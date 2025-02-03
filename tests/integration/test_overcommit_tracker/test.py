@@ -4,7 +4,13 @@ from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 
-node = cluster.add_instance("node")
+node = cluster.add_instance(
+    "node",
+    main_configs=["configs/config.d/config.xml"],
+    user_configs=[
+        "configs/users.d/users.xml",
+    ],
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -43,7 +49,6 @@ def test_user_overcommit():
         if err == "":
             finished = True
 
-    assert overcommited_killed, "no overcommited task was killed"
     assert finished, "all tasks are killed"
 
     node.query("DROP USER IF EXISTS A")

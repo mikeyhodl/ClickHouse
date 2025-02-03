@@ -9,6 +9,7 @@ namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
+    extern const int BAD_ARGUMENTS;
 }
 
 namespace
@@ -18,24 +19,36 @@ template <typename A>
 struct IntExp2Impl
 {
     using ResultType = UInt64;
-    static constexpr const bool allow_fixed_string = false;
-    static const constexpr bool allow_string_integer = false;
+    static constexpr bool allow_string_or_fixed_string = false;
 
-    static inline ResultType apply([[maybe_unused]] A a)
+    static ResultType apply([[maybe_unused]] A a)
     {
         if constexpr (is_big_int_v<A>)
-            throw DB::Exception("intExp2 not implemented for big integers", ErrorCodes::NOT_IMPLEMENTED);
+        {
+            throw DB::Exception(ErrorCodes::NOT_IMPLEMENTED, "intExp2 not implemented for big integers");
+        }
         else
+        {
+            if constexpr (std::is_floating_point_v<A>)
+            {
+                if (std::isnan(a))
+                    throw Exception(ErrorCodes::BAD_ARGUMENTS, "intExp2 must not be called with nan");
+                if (a < 0)
+                    return 0;
+                if (a >= 64)
+                    return std::numeric_limits<UInt64>::max();
+            }
             return intExp2(static_cast<int>(a));
+        }
     }
 
 #if USE_EMBEDDED_COMPILER
     static constexpr bool compilable = true;
 
-    static inline llvm::Value * compile(llvm::IRBuilder<> & b, llvm::Value * arg, bool)
+    static llvm::Value * compile(llvm::IRBuilder<> & b, llvm::Value * arg, bool)
     {
         if (!arg->getType()->isIntegerTy())
-            throw Exception("IntExp2Impl expected an integral type", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "IntExp2Impl expected an integral type");
         return b.CreateShl(llvm::ConstantInt::get(arg->getType(), 1), arg);
     }
 #endif

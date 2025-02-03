@@ -3,10 +3,10 @@ import os.path as p
 import time
 
 import pytest
+
 from helpers.client import QueryRuntimeException
 from helpers.cluster import ClickHouseCluster
-from helpers.test_tools import TSV
-from helpers.test_tools import csv_compare
+from helpers.test_tools import TSV, csv_compare
 
 cluster = ClickHouseCluster(__file__)
 instance = cluster.add_instance(
@@ -509,6 +509,6 @@ CREATE TABLE test.graphite_not_created
         )
 
     # The order of retentions is not guaranteed
-    assert "age and precision should only grow up: " in str(exc.value)
+    assert "Age and precision should only grow up: " in str(exc.value)
     assert "36000:600" in str(exc.value)
     assert "72000:300" in str(exc.value)

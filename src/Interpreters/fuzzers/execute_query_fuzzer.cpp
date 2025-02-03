@@ -1,8 +1,10 @@
-#include <iostream>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/Context.h>
-#include "Processors/Executors/PullingPipelineExecutor.h"
+#include <Interpreters/registerInterpreters.h>
+#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Executors/PushingPipelineExecutor.h>
 
+#include <Databases/registerDatabases.h>
 #include <Functions/registerFunctions.h>
 #include <AggregateFunctions/registerAggregateFunctions.h>
 #include <TableFunctions/registerTableFunctions.h>
@@ -13,44 +15,62 @@
 
 using namespace DB;
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size)
-try
+
+ContextMutablePtr context;
+
+extern "C" int LLVMFuzzerInitialize(int *, char ***)
 {
-    std::string input = std::string(reinterpret_cast<const char*>(data), size);
-
-    static SharedContextHolder shared_context;
-    static ContextMutablePtr context;
-
-    auto initialize = [&]() mutable
-    {
-        shared_context = Context::createShared();
-        context = Context::createGlobal(shared_context.get());
-        context->makeGlobalContext();
-        context->setApplicationType(Context::ApplicationType::LOCAL);
-
-        registerFunctions();
-        registerAggregateFunctions();
-        registerTableFunctions();
-        registerStorages();
-        registerDictionaries();
-        registerDisks(/* global_skip_access_check= */ true);
-        registerFormats();
-
+    if (context)
         return true;
-    };
 
-    static bool initialized = initialize();
-    (void) initialized;
+    static SharedContextHolder shared_context = Context::createShared();
+    context = Context::createGlobal(shared_context.get());
+    context->makeGlobalContext();
 
-    auto io = DB::executeQuery(input, context, true, QueryProcessingStage::Complete);
+    MainThreadStatus::getInstance();
 
-    PullingPipelineExecutor executor(io.pipeline);
-    Block res;
-    while (!res && executor.pull(res));
+    registerInterpreters();
+    registerFunctions();
+    registerAggregateFunctions();
+    registerTableFunctions(false);
+    registerDatabases();
+    registerStorages(false);
+    registerDictionaries(false);
+    registerDisks(/* global_skip_access_check= */ true);
+    registerFormats();
 
     return 0;
 }
-catch (...)
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size)
 {
-    return 1;
+    try
+    {
+        total_memory_tracker.resetCounters();
+        total_memory_tracker.setHardLimit(1_GiB);
+        CurrentThread::get().memory_tracker.resetCounters();
+        CurrentThread::get().memory_tracker.setHardLimit(1_GiB);
+
+        std::string input = std::string(reinterpret_cast<const char*>(data), size);
+
+        auto io = DB::executeQuery(input, context, QueryFlags{ .internal = true }, QueryProcessingStage::Complete).second;
+
+        /// Execute only SELECTs
+        if (io.pipeline.pulling())
+        {
+            PullingPipelineExecutor executor(io.pipeline);
+            Block res;
+            while (!res && executor.pull(res));
+        }
+        /// We don't want to execute it and thus need to finish it properly.
+        else
+        {
+            io.onCancelOrConnectionLoss();
+        }
+    }
+    catch (...)
+    {
+    }
+
+    return 0;
 }

@@ -14,7 +14,7 @@ namespace
     /// The performance test query ids can be surprisingly long like
     /// `aggregating_merge_tree_simple_aggregate_function_string.query100.profile100`,
     /// so make some allowance for them as well.
-    constexpr size_t QUERY_ID_MAX_LEN = 128;
+    constexpr size_t QUERY_ID_MAX_LEN = 100;
     static_assert(QUERY_ID_MAX_LEN <= std::numeric_limits<uint8_t>::max());
 }
 
@@ -23,8 +23,20 @@ namespace DB
 
 LazyPipeFDs TraceSender::pipe;
 
-void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Int64 size)
+static thread_local bool inside_send = false;
+void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Extras extras)
 {
+    /** The method shouldn't be called recursively or throw exceptions.
+      * There are several reasons:
+      * - avoid infinite recursion when some of subsequent functions invoke tracing;
+      * - avoid inconsistent writes if the method was interrupted by a signal handler in the middle of writing,
+      *   and then another tracing is invoked (e.g., from query profiler).
+      */
+    if (unlikely(inside_send))
+        return;
+    inside_send = true;
+    DENY_ALLOCATIONS_IN_SCOPE;
+
     constexpr size_t buf_size = sizeof(char) /// TraceCollector stop flag
         + sizeof(UInt8)                      /// String size
         + QUERY_ID_MAX_LEN                   /// Maximum query_id length
@@ -32,12 +44,15 @@ void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Int
         + sizeof(StackTrace::FramePointers)  /// Collected stack trace, maximum capacity
         + sizeof(TraceType)                  /// trace type
         + sizeof(UInt64)                     /// thread_id
-        + sizeof(Int64);                     /// size
+        + sizeof(Int64)                      /// size
+        + sizeof(void *)                     /// ptr
+        + sizeof(ProfileEvents::Event)       /// event
+        + sizeof(ProfileEvents::Count);      /// increment
 
     /// Write should be atomic to avoid overlaps
     /// (since recursive collect() is possible)
     static_assert(PIPE_BUF >= 512);
-    static_assert(buf_size <= 512, "Only write of PIPE_BUF to pipe is atomic and the minimal known PIPE_BUF across supported platforms is 512");
+    static_assert(buf_size <= PIPE_BUF, "Only write of PIPE_BUF to pipe is atomic and the minimal known PIPE_BUF across supported platforms is 512");
 
     char buffer[buf_size];
     WriteBufferFromFileDescriptorDiscardOnFailure out(pipe.fds_rw[1], buf_size, buffer);
@@ -71,9 +86,15 @@ void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Int
 
     writePODBinary(trace_type, out);
     writePODBinary(thread_id, out);
-    writePODBinary(size, out);
+    writePODBinary(extras.size, out);
+    writePODBinary(UInt64(extras.ptr), out);
+    writePODBinary(extras.event, out);
+    writePODBinary(extras.increment, out);
 
     out.next();
+    out.finalize();
+
+    inside_send = false;
 }
 
 }

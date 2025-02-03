@@ -6,7 +6,7 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CURDIR"/../shell_config.sh
 
-$CLICKHOUSE_CLIENT --multiquery <<EOF
+$CLICKHOUSE_CLIENT <<EOF
 DROP TABLE IF EXISTS src_a;
 DROP TABLE IF EXISTS src_b;
 
@@ -50,12 +50,20 @@ function insert_thread() {
 function alter_thread() {
     trap 'exit' INT
 
-    ALTER[0]="ALTER TABLE mv MODIFY QUERY SELECT v == 1 as test, v as case FROM src_a;"
-    ALTER[1]="ALTER TABLE mv MODIFY QUERY SELECT v == 2 as test, v as case FROM src_b;"
+    # Generate random ALTERs, but make sure that at least one of them is for each source table.
+    for i in {0..5}; do
+        ALTER[$i]="ALTER TABLE mv MODIFY QUERY SELECT v == 1 as test, v as case FROM src_a;"
+    done
+    # Insert 3 ALTERs to src_b randomly in each third of array.
+    ALTER[$RANDOM % 2]="ALTER TABLE mv MODIFY QUERY SELECT v == 2 as test, v as case FROM src_b;"
+    ALTER[$RANDOM % 2 + 2]="ALTER TABLE mv MODIFY QUERY SELECT v == 2 as test, v as case FROM src_b;"
+    ALTER[$RANDOM % 2 + 4]="ALTER TABLE mv MODIFY QUERY SELECT v == 2 as test, v as case FROM src_b;"
 
+    i=0
     while true; do
-        $CLICKHOUSE_CLIENT --allow_experimental_alter_materialized_view_structure=1 \
-        -q "${ALTER[$RANDOM % 2]}"
+        $CLICKHOUSE_CLIENT --allow_experimental_alter_materialized_view_structure=1 -q "${ALTER[$i % 6]}"
+        ((i=i+1))
+
         sleep "0.0$RANDOM"
 
         is_done=$($CLICKHOUSE_CLIENT -q "SELECT countIf(case = 1) > 0 AND countIf(case = 2) > 0 FROM mv;")

@@ -1,9 +1,13 @@
 #pragma once
-#include <Processors/IProcessor.h>
+
+#include <Core/SortDescription.h>
+#include <Common/HashTable/HashSet.h>
 #include <Interpreters/Aggregator.h>
+#include <Processors/Chunk.h>
+#include <Processors/IProcessor.h>
 #include <Processors/ISimpleTransform.h>
-#include <Processors/Transforms/AggregatingTransform.h>
 #include <Processors/ResizeProcessor.h>
+#include <Processors/Transforms/AggregatingTransform.h>
 
 
 namespace DB
@@ -66,7 +70,7 @@ public:
     void allowSeveralChunksForSingleBucketPerSource() { expect_several_chunks_for_single_bucket_per_source = true; }
 
 protected:
-    Status prepare() override;
+    Status prepare(const PortNumbers & updated_input_ports, const PortNumbers &) override;
     void work() override;
 
 private:
@@ -82,15 +86,15 @@ private:
     bool has_two_level = false;
 
     bool all_inputs_finished = false;
-    bool read_from_all_inputs = false;
-    std::vector<bool> read_from_input;
+    bool initialized_index_to_input = false;
+    std::vector<InputPorts::iterator> index_to_input;
+    HashSet<uint64_t> wait_input_ports_numbers;
 
-    bool expect_several_chunks_for_single_bucket_per_source = false;
+    /// If we aggregate partitioned data several chunks might be produced for the same bucket: one for each partition.
+    bool expect_several_chunks_for_single_bucket_per_source = true;
 
     /// Add chunk read from input to chunks_map, overflow_chunks or single_level_chunks according to it's chunk info.
     void addChunk(Chunk chunk, size_t input);
-    /// Read from all inputs first chunk. It is needed to detect if any source has two-level aggregation.
-    void readFromAllInputs();
     /// Push chunks if all inputs has single level.
     bool tryPushSingleLevelData();
     /// Push chunks from ready bucket if has one.
@@ -105,7 +109,8 @@ private:
 class MergingAggregatedBucketTransform : public ISimpleTransform
 {
 public:
-    explicit MergingAggregatedBucketTransform(AggregatingTransformParamsPtr params);
+    explicit MergingAggregatedBucketTransform(
+        AggregatingTransformParamsPtr params, const SortDescription & required_sort_description_ = {});
     String getName() const override { return "MergingAggregatedBucketTransform"; }
 
 protected:
@@ -113,6 +118,7 @@ protected:
 
 private:
     AggregatingTransformParamsPtr params;
+    const SortDescription required_sort_description;
 };
 
 /// Has several inputs and single output.
@@ -137,11 +143,12 @@ private:
     void addChunk(Chunk chunk, size_t from_input);
 };
 
-struct ChunksToMerge : public ChunkInfo
+struct ChunksToMerge : public ChunkInfoCloneable<ChunksToMerge>
 {
-    std::unique_ptr<Chunks> chunks;
+    std::shared_ptr<Chunks> chunks;
     Int32 bucket_num = -1;
     bool is_overflows = false;
+    UInt64 chunk_num = 0; // chunk number in order of generation, used during memory bound merging to restore chunks order
 };
 
 class Pipe;

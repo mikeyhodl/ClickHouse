@@ -6,7 +6,7 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 $CLICKHOUSE_CLIENT --query="DROP TABLE IF EXISTS set_idx;"
 
-$CLICKHOUSE_CLIENT -n --query="
+$CLICKHOUSE_CLIENT --query="
 CREATE TABLE set_idx
 (
     u64 UInt64,
@@ -14,7 +14,7 @@ CREATE TABLE set_idx
     INDEX idx (i32) TYPE set(2) GRANULARITY 1
 ) ENGINE = MergeTree()
 ORDER BY u64
-SETTINGS index_granularity = 6;"
+SETTINGS index_granularity = 6, index_granularity_bytes = '10Mi';"
 
 $CLICKHOUSE_CLIENT --query="
 INSERT INTO set_idx

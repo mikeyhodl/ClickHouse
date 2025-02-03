@@ -31,8 +31,8 @@ slug: /ru/operations/system-tables/mutations
     -   `1` — мутация завершена,
     -   `0` — мутация еще продолжается.
 
-:::info "Замечание"
-    Даже если `parts_to_do = 0`, для реплицированной таблицы возможна ситуация, когда мутация ещё не завершена из-за долго выполняющейся операции `INSERT`, которая добавляет данные, которые нужно будет мутировать.
+:::info Замечание
+Даже если `parts_to_do = 0`, для реплицированной таблицы возможна ситуация, когда мутация ещё не завершена из-за долго выполняющейся операции `INSERT`, которая добавляет данные, которые нужно будет мутировать.
 :::
 
 Если во время мутации какого-либо куска возникли проблемы, заполняются следующие столбцы:
@@ -48,4 +48,3 @@ slug: /ru/operations/system-tables/mutations
 -   [Мутации](../../sql-reference/statements/alter/index.md#mutations)
 -   [Движок MergeTree](../../engines/table-engines/mergetree-family/mergetree.md)
 -   [Репликация данных](../../engines/table-engines/mergetree-family/replication.md) (семейство ReplicatedMergeTree)
-

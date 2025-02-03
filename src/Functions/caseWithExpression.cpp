@@ -24,6 +24,9 @@ public:
 
     explicit FunctionCaseWithExpression(ContextPtr context_) : context(context_) {}
     bool isVariadic() const override { return true; }
+    bool useDefaultImplementationForConstants() const override { return false; }
+    bool useDefaultImplementationForNulls() const override { return false; }
+    bool useDefaultImplementationForNothing() const override { return false; }
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return false; }
     size_t getNumberOfArguments() const override { return 0; }
     String getName() const override { return name; }
@@ -31,8 +34,7 @@ public:
     DataTypePtr getReturnTypeImpl(const DataTypes & args) const override
     {
         if (args.empty())
-            throw Exception{"Function " + getName() + " expects at least 1 arguments",
-                ErrorCodes::TOO_FEW_ARGUMENTS_FOR_FUNCTION};
+            throw Exception(ErrorCodes::TOO_FEW_ARGUMENTS_FOR_FUNCTION, "Function {} expects at least 1 arguments", getName());
 
         /// See the comments in executeImpl() to understand why we actually have to
         /// get the return type of a transform function.
@@ -52,8 +54,7 @@ public:
     ColumnPtr executeImpl(const ColumnsWithTypeAndName & args, const DataTypePtr & result_type, size_t input_rows_count) const override
     {
         if (args.empty())
-            throw Exception{"Function " + getName() + " expects at least 1 argument",
-                ErrorCodes::TOO_FEW_ARGUMENTS_FOR_FUNCTION};
+            throw Exception(ErrorCodes::TOO_FEW_ARGUMENTS_FOR_FUNCTION, "Function {} expects at least 1 argument", getName());
 
         /// In the following code, we turn the construction:
         /// CASE expr WHEN val[0] THEN branch[0] ... WHEN val[N-1] then branch[N-1] ELSE branchN
@@ -92,13 +93,12 @@ public:
 
         auto fun_array = FunctionFactory::instance().get("array", context);
 
-        src_array_col.column = fun_array->build(src_array_elems)->execute(src_array_elems, src_array_type, input_rows_count);
-        dst_array_col.column = fun_array->build(dst_array_elems)->execute(dst_array_elems, dst_array_type, input_rows_count);
+        src_array_col.column = fun_array->build(src_array_elems)->execute(src_array_elems, src_array_type, input_rows_count, /* dry_run = */ false);
+        dst_array_col.column = fun_array->build(dst_array_elems)->execute(dst_array_elems, dst_array_type, input_rows_count, /* dry_run = */ false);
 
         /// Execute transform.
         ColumnsWithTypeAndName transform_args{args.front(), src_array_col, dst_array_col, args.back()};
-        return FunctionFactory::instance().get("transform", context)->build(transform_args)
-            ->execute(transform_args, result_type, input_rows_count);
+        return FunctionFactory::instance().get("transform", context)->build(transform_args)->execute(transform_args, result_type, input_rows_count, /* dry_run = */ false);
     }
 
 private:
@@ -112,9 +112,7 @@ REGISTER_FUNCTION(CaseWithExpression)
     factory.registerFunction<FunctionCaseWithExpression>();
 
     /// These are obsolete function names.
-    factory.registerFunction<FunctionCaseWithExpression>("caseWithExpr");
+    factory.registerAlias("caseWithExpr", "caseWithExpression");
 }
 
 }
-
-

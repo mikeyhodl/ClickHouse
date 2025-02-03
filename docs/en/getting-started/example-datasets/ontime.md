@@ -386,15 +386,13 @@ ORDER BY c DESC
 LIMIT 10;
 ```
 
-You can also play with the data in Playground, [example](https://play.clickhouse.com/play?user=play#U0VMRUNUIERheU9mV2VlaywgY291bnQoKikgQVMgYwpGUk9NIG9udGltZQpXSEVSRSBZZWFyPj0yMDAwIEFORCBZZWFyPD0yMDA4CkdST1VQIEJZIERheU9mV2VlawpPUkRFUiBCWSBjIERFU0M7Cg==).
+You can also play with the data in Playground, [example](https://sql.clickhouse.com?query_id=M4FSVBVMSHY98NKCQP8N4K).
 
 This performance test was created by Vadim Tkachenko. See:
 
--   https://www.percona.com/blog/2009/10/02/analyzing-air-traffic-performance-with-infobright-and-monetdb/
--   https://www.percona.com/blog/2009/10/26/air-traffic-queries-in-luciddb/
--   https://www.percona.com/blog/2009/11/02/air-traffic-queries-in-infinidb-early-alpha/
--   https://www.percona.com/blog/2014/04/21/using-apache-hadoop-and-impala-together-with-mysql-for-data-analysis/
--   https://www.percona.com/blog/2016/01/07/apache-spark-with-air-ontime-performance-data/
--   http://nickmakos.blogspot.ru/2012/08/analyzing-air-traffic-performance-with.html
-
-[Original article](https://clickhouse.com/docs/en/getting_started/example_datasets/ontime/) <!--hide-->
+- https://www.percona.com/blog/2009/10/02/analyzing-air-traffic-performance-with-infobright-and-monetdb/
+- https://www.percona.com/blog/2009/10/26/air-traffic-queries-in-luciddb/
+- https://www.percona.com/blog/2009/11/02/air-traffic-queries-in-infinidb-early-alpha/
+- https://www.percona.com/blog/2014/04/21/using-apache-hadoop-and-impala-together-with-mysql-for-data-analysis/
+- https://www.percona.com/blog/2016/01/07/apache-spark-with-air-ontime-performance-data/
+- http://nickmakos.blogspot.ru/2012/08/analyzing-air-traffic-performance-with.html

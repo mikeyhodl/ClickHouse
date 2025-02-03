@@ -6,6 +6,7 @@
 #include <Columns/ColumnString.h>
 #include <Interpreters/Context.h>
 #include <Common/Macros.h>
+#include <Core/Block.h>
 #include <Core/Field.h>
 
 
@@ -49,10 +50,12 @@ public:
 
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return false; }
 
+    bool isServerConstant() const override { return true; }
+
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
         if (arguments.size() != 1 || !isString(arguments[0].type) || !arguments[0].column || !isColumnConst(*arguments[0].column))
-            throw Exception("Function " + getName() + " accepts one const string argument", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Function {} accepts one const string argument", getName());
         auto scalar_name = assert_cast<const ColumnConst &>(*arguments[0].column).getValue<String>();
         ContextPtr query_context = getContext()->hasQueryContext() ? getContext()->getQueryContext() : getContext();
         scalar = query_context->getScalar(scalar_name).getByPosition(0);
@@ -83,9 +86,9 @@ public:
 
     static ColumnWithTypeAndName createScalar(ContextPtr context_)
     {
-        if (const auto * block = context_->tryGetSpecialScalar(Scalar::scalar_name))
+        if (auto block = context_->tryGetSpecialScalar(Scalar::scalar_name))
             return block->getByPosition(0);
-        else if (context_->hasQueryContext())
+        if (context_->hasQueryContext())
         {
             if (context_->getQueryContext()->hasScalar(Scalar::scalar_name))
                 return context_->getQueryContext()->getScalar(Scalar::scalar_name).getByPosition(0);
@@ -105,10 +108,7 @@ public:
 
     bool isDeterministic() const override { return false; }
 
-    bool isDeterministicInScopeOfQuery() const override
-    {
-        return true;
-    }
+    bool isServerConstant() const override { return true; }
 
     bool isSuitableForConstantFolding() const override { return !is_distributed; }
 
@@ -126,7 +126,12 @@ public:
 
     ColumnPtr executeImpl(const ColumnsWithTypeAndName &, const DataTypePtr &, size_t input_rows_count) const override
     {
-        return ColumnConst::create(scalar.column, input_rows_count);
+        auto result = ColumnConst::create(scalar.column, input_rows_count);
+
+        if (!isSuitableForConstantFolding())
+            return result->convertToFullColumnIfConst();
+
+        return result;
     }
 
 private:

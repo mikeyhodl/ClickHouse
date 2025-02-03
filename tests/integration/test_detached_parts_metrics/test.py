@@ -1,8 +1,13 @@
 import time
+
 import pytest
+
 from helpers.cluster import ClickHouseCluster
 from helpers.test_tools import assert_eq_with_retry
-
+from helpers.wait_for_helpers import (
+    wait_for_delete_empty_parts,
+    wait_for_delete_inactive_parts,
+)
 
 cluster = ClickHouseCluster(__file__)
 node1 = cluster.add_instance(
@@ -20,7 +25,7 @@ def started_cluster():
         cluster.shutdown()
 
 
-def test_event_time_microseconds_field(started_cluster):
+def test_numbers_of_detached_parts(started_cluster):
     cluster.start()
     query_create = """
     CREATE TABLE t
@@ -68,6 +73,7 @@ def test_event_time_microseconds_field(started_cluster):
 
     # detach some parts and wait until asynchronous metrics notice it
     node1.query("ALTER TABLE t DETACH PARTITION '20220901';")
+    wait_for_delete_empty_parts(node1, "t")
 
     assert 2 == int(node1.query(query_count_detached_parts))
     assert 1 == int(node1.query(query_count_active_parts))
@@ -81,6 +87,7 @@ def test_event_time_microseconds_field(started_cluster):
 
     # detach the rest parts and wait until asynchronous metrics notice it
     node1.query("ALTER TABLE t DETACH PARTITION ALL")
+    wait_for_delete_empty_parts(node1, "t")
 
     assert 3 == int(node1.query(query_count_detached_parts))
     assert 0 == int(node1.query(query_count_active_parts))

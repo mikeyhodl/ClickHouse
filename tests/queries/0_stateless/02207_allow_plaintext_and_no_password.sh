@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
-# Tags: no-tsan, no-asan, no-ubsan, no-msan, no-parallel, no-fasttest
-# Tag no-tsan: requires jemalloc to track small allocations
-# Tag no-asan: requires jemalloc to track small allocations
-# Tag no-ubsan: requires jemalloc to track small allocations
-# Tag no-msan: requires jemalloc to track small allocations
-
-
+# Tags: no-parallel, no-fasttest
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CURDIR"/../shell_config.sh
 
-cp /etc/clickhouse-server/users.xml "$CURDIR"/users.xml
+cp ${CLICKHOUSE_CONFIG_DIR}/users.xml "$CURDIR"/users.xml
 sed -i 's/<password><\/password>/<password_sha256_hex>c64c5e4e53ea1a9f1427d2713b3a22bbebe8940bc807adaf654744b1568c70ab<\/password_sha256_hex>/g' "$CURDIR"/users.xml
  sed -i 's/<!-- <access_management>1<\/access_management> -->/<access_management>1<\/access_management>/g' "$CURDIR"/users.xml
 

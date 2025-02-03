@@ -1,6 +1,6 @@
 ---
 slug: /en/sql-reference/aggregate-functions/reference/anyheavy
-sidebar_position: 103
+sidebar_position: 104
 ---
 
 # anyHeavy
@@ -13,7 +13,7 @@ anyHeavy(column)
 
 **Arguments**
 
--   `column` – The column name.
+- `column` – The column name.
 
 **Example**
 

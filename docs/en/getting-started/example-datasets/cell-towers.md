@@ -1,9 +1,10 @@
 ---
 slug: /en/getting-started/example-datasets/cell-towers
-sidebar_label: Cell Towers
+sidebar_label: Geo Data
 sidebar_position: 3
-title: "Cell Towers"
+title: "Geo Data using the Cell Tower Dataset"
 ---
+
 import ConnectionDetails from '@site/docs/en/_snippets/_gather_your_details_http.mdx';
 
 import Tabs from '@theme/Tabs';
@@ -16,7 +17,7 @@ import SupersetDocker from '@site/docs/en/_snippets/_add_superset_detail.md';
 ## Goal
 
 In this guide you will learn how to:
-- Load the OpenCelliD data in Clickhouse
+- Load the OpenCelliD data in ClickHouse
 - Connect Apache Superset to ClickHouse
 - Build a dashboard based on data available in the dataset
 
@@ -28,7 +29,7 @@ Here is a preview of the dashboard created in this guide:
 
 This dataset is from [OpenCelliD](https://www.opencellid.org/) - The world's largest Open Database of Cell Towers.
 
-As of 2021, it contains more than 40 million records about cell towers (GSM, LTE, UMTS, etc.) around the world with their geographical coordinates and metadata (country code, network, etc).
+As of 2021, it contains more than 40 million records about cell towers (GSM, LTE, UMTS, etc.) around the world with their geographical coordinates and metadata (country code, network, etc.).
 
 OpenCelliD Project is licensed under a Creative Commons Attribution-ShareAlike 4.0 International License, and we redistribute a snapshot of this dataset under the terms of the same license. The up-to-date version of the dataset is available to download after sign in.
 
@@ -74,22 +75,7 @@ This is the output of `DESCRIBE`.  Down further in this guide the field type cho
 </TabItem>
 <TabItem value="selfmanaged" label="Self-managed">
 
-1. Download the snapshot of the dataset from February 2021: [cell_towers.csv.xz](https://datasets.clickhouse.com/cell_towers.csv.xz) (729 MB).
-
-2. Validate the integrity (optional step):
-```bash
-md5sum cell_towers.csv.xz
-```
-```response
-8cf986f4a0d9f12c6f384a0e9192c908  cell_towers.csv.xz
-```
-
-3. Decompress it with the following command:
-```bash
-xz -d cell_towers.csv.xz
-```
-
-4. Create a table:
+1. Create a table:
 
 ```sql
 CREATE TABLE cell_towers
@@ -112,9 +98,10 @@ CREATE TABLE cell_towers
 ENGINE = MergeTree ORDER BY (radio, mcc, net, created);
 ```
 
-5. Insert the dataset:
-```bash
-clickhouse-client --query "INSERT INTO cell_towers FORMAT CSVWithNames" < cell_towers.csv
+2. Import the dataset from a public S3 bucket (686 MB):
+
+```sql
+INSERT INTO cell_towers SELECT * FROM s3('https://datasets-documentation.s3.amazonaws.com/cell_towers/cell_towers.csv.xz', 'CSVWithNames')
 ```
 
 </TabItem>
@@ -131,7 +118,7 @@ SELECT radio, count() AS c FROM cell_towers GROUP BY radio ORDER BY c DESC
 ┌─radio─┬────────c─┐
 │ UMTS  │ 20686487 │
 │ LTE   │ 12101148 │
-│ GSM   │  9931312 │
+│ GSM   │  9931304 │
 │ CDMA  │   556344 │
 │ NR    │      867 │
 └───────┴──────────┘
@@ -163,7 +150,7 @@ SELECT mcc, count() FROM cell_towers GROUP BY mcc ORDER BY count() DESC LIMIT 10
 
 Based on the above query and the [MCC list](https://en.wikipedia.org/wiki/Mobile_country_code), the countries with the most cell towers are: the USA, Germany, and Russia.
 
-You may want to create a [Dictionary](../../sql-reference/dictionaries/external-dictionaries/external-dicts.md) in ClickHouse to decode these values.
+You may want to create a [Dictionary](../../sql-reference/dictionaries/index.md) in ClickHouse to decode these values.
 
 ## Use case: Incorporate geo data {#use-case}
 
@@ -275,7 +262,7 @@ Here is a description of the columns taken from the OpenCelliD forum:
 To find your MCC check [Mobile network codes](https://en.wikipedia.org/wiki/Mobile_country_code), and use the three digits in the **Mobile country code** column.
 :::
 
-The schema for this table was designed for compact storage on disk and query speed.  
+The schema for this table was designed for compact storage on disk and query speed.
 - The `radio` data is stored as an `Enum8` (`UInt8`) rather than a string.
 - `mcc` or Mobile country code, is stored as a `UInt16` as we know the range is 1 - 999.
 - `lon` and `lat` are `Float64`.
@@ -307,7 +294,7 @@ To build a Superset dashboard using the OpenCelliD dataset you should:
   ![Choose clickhouse connect as database type](@site/docs/en/getting-started/example-datasets/images/superset-choose-a-database.png)
 
 :::note
-  If **ClickHouse Connect** is not one of your options, then you will need to install it.  The comand is `pip install clickhouse-connect`, and more info is [available here](https://pypi.org/project/clickhouse-connect/).
+  If **ClickHouse Connect** is not one of your options, then you will need to install it. The command is `pip install clickhouse-connect`, and more info is [available here](https://pypi.org/project/clickhouse-connect/).
 :::
 
 #### Add your connection details:
@@ -316,7 +303,7 @@ To build a Superset dashboard using the OpenCelliD dataset you should:
   Make sure that you set **SSL** on when connecting to ClickHouse Cloud or other ClickHouse systems that enforce the use of SSL.
 :::
 
-  ![Add ClickHouse as a Superset datasource](@site/docs/en/getting-started/example-datasets/images/superset-connect-a-database.png)
+  ![Add ClickHouse as a Superset data source](@site/docs/en/getting-started/example-datasets/images/superset-connect-a-database.png)
 
 ### Add the table **cell_towers** as a Superset **dataset**
 
@@ -354,14 +341,14 @@ Click on **UPDATE CHART** to render the visualization.
 
 ### Add the charts to a **dashboard**
 
-This screenshot shows cell tower locations with LTE, UMTS, and GSM radios.  The charts are all created in the same way and they are added to a dashboard.
+This screenshot shows cell tower locations with LTE, UMTS, and GSM radios.  The charts are all created in the same way, and they are added to a dashboard.
 
   ![Dashboard of cell towers by radio type in mcc 204](@site/docs/en/getting-started/example-datasets/images/superset-cell-tower-dashboard.png)
 
 :::tip
-The data is also available for interactive queries in the [Playground](https://play.clickhouse.com/play?user=play).
+The data is also available for interactive queries in the [Playground](https://sql.clickhouse.com).
 
-This [example](https://play.clickhouse.com/play?user=play#U0VMRUNUIG1jYywgY291bnQoKSBGUk9NIGNlbGxfdG93ZXJzIEdST1VQIEJZIG1jYyBPUkRFUiBCWSBjb3VudCgpIERFU0M=) will populate the username and even the query for you.
+This [example](https://sql.clickhouse.com?query_id=UV8M4MAGS2PWAUOAYAAARM) will populate the username and even the query for you.
 
-Although you cannot create tables in the Playground, you can run all of the queries and even use Superset (adjust the hostname and port number).
+Although you cannot create tables in the Playground, you can run all of the queries and even use Superset (adjust the host name and port number).
 :::

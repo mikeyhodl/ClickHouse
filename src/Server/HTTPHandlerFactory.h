@@ -1,13 +1,11 @@
 #pragma once
 
-#include <Interpreters/AsynchronousMetrics.h>
-#include <Server/HTTP/HTMLForm.h>
 #include <Server/HTTP/HTTPRequestHandlerFactory.h>
 #include <Server/HTTPHandlerRequestFilter.h>
-#include <Common/StringUtils/StringUtils.h>
-#include <Common/logger_useful.h>
-
+#include <Server/HTTPRequestHandlerFactoryMain.h>
+#include <Common/StringUtils.h>
 #include <Poco/Util/AbstractConfiguration.h>
+
 
 namespace DB
 {
@@ -18,23 +16,7 @@ namespace ErrorCodes
 }
 
 class IServer;
-
-/// Handle request using child handlers
-class HTTPRequestHandlerFactoryMain : public HTTPRequestHandlerFactory
-{
-public:
-    explicit HTTPRequestHandlerFactoryMain(const std::string & name_);
-
-    void addHandler(HTTPRequestHandlerFactoryPtr child_factory) { child_factories.emplace_back(child_factory); }
-
-    std::unique_ptr<HTTPRequestHandler> createRequestHandler(const HTTPServerRequest & request) override;
-
-private:
-    Poco::Logger * log;
-    std::string name;
-
-    std::vector<HTTPRequestHandlerFactoryPtr> child_factories;
-};
+class AsynchronousMetrics;
 
 template <typename TEndpoint>
 class HandlingRuleHTTPHandlerFactory : public HTTPRequestHandlerFactory
@@ -42,16 +24,14 @@ class HandlingRuleHTTPHandlerFactory : public HTTPRequestHandlerFactory
 public:
     using Filter = std::function<bool(const HTTPServerRequest &)>;
 
-    template <typename... TArgs>
-    explicit HandlingRuleHTTPHandlerFactory(TArgs &&... args)
+    using Creator = std::function<std::unique_ptr<TEndpoint>()>;
+    explicit HandlingRuleHTTPHandlerFactory(Creator && creator_)
+        : creator(std::move(creator_))
+    {}
+
+    explicit HandlingRuleHTTPHandlerFactory(IServer & server)
     {
-        creator = [args = std::tuple<TArgs...>(std::forward<TArgs>(args) ...)]()
-        {
-            return std::apply([&](auto && ... endpoint_args)
-            {
-                return std::make_unique<TEndpoint>(std::forward<decltype(endpoint_args)>(endpoint_args)...);
-            }, std::move(args));
-        };
+        creator = [&server]() -> std::unique_ptr<TEndpoint> { return std::make_unique<TEndpoint>(server); };
     }
 
     void addFilter(Filter cur_filter)
@@ -72,14 +52,16 @@ public:
         {
             if (filter_type == "handler")
                 continue;
-            else if (filter_type == "url")
+            if (filter_type == "url")
                 addFilter(urlFilter(config, prefix + ".url"));
+            else if (filter_type == "empty_query_string")
+                addFilter(emptyQueryStringFilter());
             else if (filter_type == "headers")
                 addFilter(headersFilter(config, prefix + ".headers"));
             else if (filter_type == "methods")
                 addFilter(methodsFilter(config, prefix + ".methods"));
             else
-                throw Exception("Unknown element in config: " + prefix + "." + filter_type, ErrorCodes::UNKNOWN_ELEMENT_IN_CONFIG);
+                throw Exception(ErrorCodes::UNKNOWN_ELEMENT_IN_CONFIG, "Unknown element in config: {}.{}", prefix, filter_type);
         }
     }
 
@@ -108,7 +90,7 @@ public:
     {
         addFilter([](const auto & request)
         {
-            return (request.getURI().find('?') != std::string::npos
+            return (request.getURI().contains('?')
                 && (request.getMethod() == Poco::Net::HTTPRequest::HTTP_GET
                 || request.getMethod() == Poco::Net::HTTPRequest::HTTP_HEAD))
                 || request.getMethod() == Poco::Net::HTTPRequest::HTTP_OPTIONS
@@ -140,12 +122,6 @@ HTTPRequestHandlerFactoryPtr createPredefinedHandlerFactory(IServer & server,
 
 HTTPRequestHandlerFactoryPtr createReplicasStatusHandlerFactory(IServer & server,
     const Poco::Util::AbstractConfiguration & config,
-    const std::string & config_prefix);
-
-HTTPRequestHandlerFactoryPtr
-createPrometheusHandlerFactory(IServer & server,
-    const Poco::Util::AbstractConfiguration & config,
-    AsynchronousMetrics & async_metrics,
     const std::string & config_prefix);
 
 /// @param server - used in handlers to check IServer::isCancelled()

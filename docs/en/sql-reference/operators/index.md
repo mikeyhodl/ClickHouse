@@ -2,6 +2,7 @@
 slug: /en/sql-reference/operators/
 sidebar_position: 38
 sidebar_label: Operators
+displayed_sidebar: sqlreference
 ---
 
 # Operators
@@ -24,7 +25,7 @@ For tuple negation: [tupleNegate](../../sql-reference/functions/tuple-functions.
 
 `a * b` – The `multiply (a, b)` function.
 
-For multiplying tuple by number: [tupleMultiplyByNumber](../../sql-reference/functions/tuple-functions.md#tuplemultiplybynumber), for scalar profuct: [dotProduct](../../sql-reference/functions/tuple-functions.md#dotproduct).
+For multiplying tuple by number: [tupleMultiplyByNumber](../../sql-reference/functions/tuple-functions.md#tuplemultiplybynumber), for scalar product: [dotProduct](../../sql-reference/functions/tuple-functions.md#dotproduct).
 
 `a / b` – The `divide(a, b)` function.
 
@@ -159,12 +160,12 @@ Extract parts from a given date. For example, you can retrieve a month from a gi
 
 The `part` parameter specifies which part of the date to retrieve. The following values are available:
 
--   `DAY` — The day of the month. Possible values: 1–31.
--   `MONTH` — The number of a month. Possible values: 1–12.
--   `YEAR` — The year.
--   `SECOND` — The second. Possible values: 0–59.
--   `MINUTE` — The minute. Possible values: 0–59.
--   `HOUR` — The hour. Possible values: 0–23.
+- `DAY` — The day of the month. Possible values: 1–31.
+- `MONTH` — The number of a month. Possible values: 1–12.
+- `YEAR` — The year.
+- `SECOND` — The second. Possible values: 0–59.
+- `MINUTE` — The minute. Possible values: 0–59.
+- `HOUR` — The hour. Possible values: 0–23.
 
 The `part` parameter is case-insensitive.
 
@@ -229,7 +230,7 @@ Types of intervals:
 
 You can also use a string literal when setting the `INTERVAL` value. For example, `INTERVAL 1 HOUR` is identical to the `INTERVAL '1 hour'` or `INTERVAL '1' hour`.
 
-:::warning    
+:::tip    
 Intervals with different types can’t be combined. You can’t use expressions like `INTERVAL 4 DAY 1 HOUR`. Specify intervals in units that are smaller or equal to the smallest unit of the interval, for example, `INTERVAL 25 HOUR`. You can use consecutive operations, like in the example below.
 :::
 
@@ -265,8 +266,6 @@ SELECT now() AS current_date_time, current_date_time + INTERVAL '4' day + INTERV
 └─────────────────────┴────────────────────────────────────────────────────────────┘
 ```
 
-You can work with dates without using `INTERVAL`, just by adding or subtracting seconds, minutes, and hours. For example, an interval of one day can be set by adding `60*60*24`.
-
 :::note    
 The `INTERVAL` syntax or `addDays` function are always preferred. Simple addition or subtraction (syntax like `now() + ...`) doesn't consider time settings. For example, daylight saving time.
 :::
@@ -285,8 +284,8 @@ SELECT toDateTime('2014-10-26 00:00:00', 'Asia/Istanbul') AS time, time + 60 * 6
 
 **See Also**
 
--   [Interval](../../sql-reference/data-types/special-data-types/interval.md) data type
--   [toInterval](../../sql-reference/functions/type-conversion-functions.md#function-tointerval) type conversion functions
+- [Interval](../../sql-reference/data-types/special-data-types/interval.md) data type
+- [toInterval](../../sql-reference/functions/type-conversion-functions.md#function-tointerval) type conversion functions
 
 ## Logical AND Operator
 
@@ -353,12 +352,12 @@ For efficiency, the `and` and `or` functions accept any number of arguments. The
 
 ClickHouse supports the `IS NULL` and `IS NOT NULL` operators.
 
-### IS NULL
+### IS NULL {#is_null}
 
--   For [Nullable](../../sql-reference/data-types/nullable.md) type values, the `IS NULL` operator returns:
-    -   `1`, if the value is `NULL`.
-    -   `0` otherwise.
--   For other values, the `IS NULL` operator always returns `0`.
+- For [Nullable](../../sql-reference/data-types/nullable.md) type values, the `IS NULL` operator returns:
+    - `1`, if the value is `NULL`.
+    - `0` otherwise.
+- For other values, the `IS NULL` operator always returns `0`.
 
 Can be optimized by enabling the [optimize_functions_to_subcolumns](../../operations/settings/settings.md#optimize-functions-to-subcolumns) setting. With `optimize_functions_to_subcolumns = 1` the function reads only [null](../../sql-reference/data-types/nullable.md#finding-null) subcolumn instead of reading and processing the whole column data. The query `SELECT n IS NULL FROM table` transforms to `SELECT n.null FROM TABLE`.
 
@@ -374,12 +373,12 @@ SELECT x+100 FROM t_null WHERE y IS NULL
 └──────────────┘
 ```
 
-### IS NOT NULL
+### IS NOT NULL {#is_not_null}
 
--   For [Nullable](../../sql-reference/data-types/nullable.md) type values, the `IS NOT NULL` operator returns:
-    -   `0`, if the value is `NULL`.
-    -   `1` otherwise.
--   For other values, the `IS NOT NULL` operator always returns `1`.
+- For [Nullable](../../sql-reference/data-types/nullable.md) type values, the `IS NOT NULL` operator returns:
+    - `0`, if the value is `NULL`.
+    - `1` otherwise.
+- For other values, the `IS NOT NULL` operator always returns `1`.
 
 <!-- -->
 

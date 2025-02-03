@@ -1,3 +1,4 @@
+#include <Processors/Merges/Algorithms/MergeTreeReadInfo.h>
 #include <Processors/Merges/IMergingTransform.h>
 
 namespace DB
@@ -14,10 +15,12 @@ IMergingTransformBase::IMergingTransformBase(
     const Block & input_header,
     const Block & output_header,
     bool have_all_inputs_,
-    UInt64 limit_hint_)
+    UInt64 limit_hint_,
+    bool always_read_till_end_)
     : IProcessor(InputPorts(num_inputs, input_header), {output_header})
     , have_all_inputs(have_all_inputs_)
     , limit_hint(limit_hint_)
+    , always_read_till_end(always_read_till_end_)
 {
 }
 
@@ -33,22 +36,24 @@ IMergingTransformBase::IMergingTransformBase(
     const Blocks & input_headers,
     const Block & output_header,
     bool have_all_inputs_,
-    UInt64 limit_hint_)
+    UInt64 limit_hint_,
+    bool always_read_till_end_)
     : IProcessor(createPorts(input_headers), {output_header})
     , have_all_inputs(have_all_inputs_)
     , limit_hint(limit_hint_)
+    , always_read_till_end(always_read_till_end_)
 {
 }
 
 void IMergingTransformBase::onNewInput()
 {
-    throw Exception("onNewInput is not implemented for " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "onNewInput is not implemented for {}", getName());
 }
 
 void IMergingTransformBase::addInput()
 {
     if (have_all_inputs)
-        throw Exception("IMergingTransform already have all inputs.", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "IMergingTransform already have all inputs.");
 
     inputs.emplace_back(outputs.front().getHeader(), this);
     onNewInput();
@@ -57,7 +62,7 @@ void IMergingTransformBase::addInput()
 void IMergingTransformBase::setHaveAllInputs()
 {
     if (have_all_inputs)
-        throw Exception("IMergingTransform already have all inputs.", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "IMergingTransform already have all inputs.");
 
     have_all_inputs = true;
 }
@@ -97,11 +102,16 @@ IProcessor::Status IMergingTransformBase::prepareInitializeInputs()
         /// setNotNeeded after reading first chunk, because in optimismtic case
         /// (e.g. with optimized 'ORDER BY primary_key LIMIT n' and small 'n')
         /// we won't have to read any chunks anymore;
-        auto chunk = input.pull(limit_hint != 0);
-        if (limit_hint && chunk.getNumRows() < limit_hint)
+        /// If virtual row exists, let it pass through, so don't read more chunks.
+        auto chunk = input.pull(true);
+        bool virtual_row = isVirtualRow(chunk);
+        if (limit_hint == 0 && !virtual_row)
             input.setNeeded();
 
-        if (!chunk.hasRows())
+        if (!virtual_row && ((limit_hint && chunk.getNumRows() < limit_hint) || always_read_till_end))
+            input.setNeeded();
+
+        if (!virtual_row && !chunk.hasRows())
         {
             if (!input.isFinished())
             {
@@ -153,7 +163,7 @@ IProcessor::Status IMergingTransformBase::prepare()
     bool is_port_full = !output.canPush();
 
     /// Push if has data.
-    if ((state.output_chunk || state.output_chunk.hasChunkInfo()) && !is_port_full)
+    if ((state.output_chunk || !state.output_chunk.getChunkInfos().empty()) && !is_port_full)
         output.push(std::move(state.output_chunk));
 
     if (!is_initialized)
@@ -163,6 +173,21 @@ IProcessor::Status IMergingTransformBase::prepare()
     {
         if (is_port_full)
             return Status::PortFull;
+
+        if (always_read_till_end)
+        {
+            for (auto & input : inputs)
+            {
+                if (!input.isFinished())
+                {
+                    input.setNeeded();
+                    if (input.hasData())
+                        std::ignore = input.pull();
+
+                    return Status::NeedData;
+                }
+            }
+        }
 
         for (auto & input : inputs)
             input.close();

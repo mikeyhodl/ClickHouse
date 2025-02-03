@@ -1,11 +1,11 @@
 #include <Functions/FunctionFactory.h>
 #include <Functions/IFunction.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnConst.h>
-#include "domain.h"
+#include <Functions/URL/domain.h>
 
 
 namespace DB
@@ -30,30 +30,30 @@ struct FunctionPortImpl : public IFunction
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
         if (arguments.size() != 1 && arguments.size() != 2)
-            throw Exception("Number of arguments for function " + getName() + " doesn't match: passed "
-                            + std::to_string(arguments.size()) + ", should be 1 or 2",
-                            ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                            "Number of arguments for function {} doesn't match: passed {}, should be 1 or 2",
+                            getName(), arguments.size());
 
         if (!WhichDataType(arguments[0].type).isString())
-            throw Exception("Illegal type " + arguments[0].type->getName() + " of first argument of function " + getName() + ". Must be String.",
-                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of first argument of function {}. "
+                "Must be String.", arguments[0].type->getName(), getName());
 
         if (arguments.size() == 2 && !WhichDataType(arguments[1].type).isUInt16())
-            throw Exception("Illegal type " + arguments[1].type->getName() + " of second argument of function " + getName() + ". Must be UInt16.",
-                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of second argument of function {}. "
+                "Must be UInt16.", arguments[1].type->getName(), getName());
 
         return std::make_shared<DataTypeUInt16>();
     }
 
 
-    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t) const override
+    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t input_rows_count) const override
     {
         UInt16 default_port = 0;
         if (arguments.size() == 2)
         {
             const auto * port_column = checkAndGetColumn<ColumnConst>(arguments[1].column.get());
             if (!port_column)
-                throw Exception("Second argument for function " + getName() + " must be constant UInt16", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Second argument for function {} must be constant UInt16", getName());
             default_port = port_column->getValue<UInt16>();
         }
 
@@ -64,22 +64,18 @@ struct FunctionPortImpl : public IFunction
             typename ColumnVector<UInt16>::Container & vec_res = col_res->getData();
             vec_res.resize(url_column->size());
 
-            vector(default_port, url_strs->getChars(), url_strs->getOffsets(), vec_res);
+            vector(default_port, url_strs->getChars(), url_strs->getOffsets(), vec_res, input_rows_count);
             return col_res;
         }
-        else
-            throw Exception(
-                "Illegal column " + arguments[0].column->getName() + " of argument of function " + getName(),
-                ErrorCodes::ILLEGAL_COLUMN);
+        throw Exception(
+            ErrorCodes::ILLEGAL_COLUMN, "Illegal column {} of argument of function {}", arguments[0].column->getName(), getName());
 }
 
 private:
-    static void vector(UInt16 default_port, const ColumnString::Chars & data, const ColumnString::Offsets & offsets, PaddedPODArray<UInt16> & res)
+    static void vector(UInt16 default_port, const ColumnString::Chars & data, const ColumnString::Offsets & offsets, PaddedPODArray<UInt16> & res, size_t input_rows_count)
     {
-        size_t size = offsets.size();
-
         ColumnString::Offset prev_offset = 0;
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             res[i] = extractPort(default_port, data, prev_offset, offsets[i] - prev_offset - 1);
             prev_offset = offsets[i];
@@ -139,17 +135,15 @@ struct FunctionPortRFC : public FunctionPortImpl<true>
 
 REGISTER_FUNCTION(Port)
 {
-    factory.registerFunction<FunctionPort>(
+    factory.registerFunction<FunctionPort>(FunctionDocumentation
     {
-        R"(Returns the port or `default_port` if there is no port in the URL (or in case of validation error).)",
-        Documentation::Examples{},
-        Documentation::Categories{"URL"}
+        .description=R"(Returns the port or `default_port` if there is no port in the URL (or in case of validation error).)",
+        .category{"URLs"}
     });
-    factory.registerFunction<FunctionPortRFC>(
+    factory.registerFunction<FunctionPortRFC>(FunctionDocumentation
     {
-        R"(Similar to `port`, but conforms to RFC 3986.)",
-        Documentation::Examples{},
-        Documentation::Categories{"URL"}
+        .description=R"(Similar to `port`, but conforms to RFC 3986.)",
+        .category{"URLs"}
     });
 }
 

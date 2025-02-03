@@ -11,6 +11,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
+    extern const int QUERY_WAS_CANCELLED;
 }
 
 class PushingSource : public ISource
@@ -63,9 +64,11 @@ PushingPipelineExecutor::PushingPipelineExecutor(QueryPipeline & pipeline_) : pi
 
 PushingPipelineExecutor::~PushingPipelineExecutor()
 {
+    /// It must be finalized explicitly. Otherwise we cancel it assuming it's due to an exception.
+    chassert(finished || std::uncaught_exceptions() || std::current_exception());
     try
     {
-        finish();
+        cancel();
     }
     catch (...)
     {
@@ -78,6 +81,15 @@ const Block & PushingPipelineExecutor::getHeader() const
     return pushing_source->getPort().getHeader();
 }
 
+[[noreturn]] static void throwOnExecutionStatus(PipelineExecutor::ExecutionStatus status)
+{
+    if (status == PipelineExecutor::ExecutionStatus::CancelledByTimeout
+        || status == PipelineExecutor::ExecutionStatus::CancelledByUser)
+        throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Query was cancelled");
+
+    throw Exception(ErrorCodes::LOGICAL_ERROR,
+        "Pipeline for PushingPipelineExecutor was finished before all data was inserted");
+}
 
 void PushingPipelineExecutor::start()
 {
@@ -89,8 +101,7 @@ void PushingPipelineExecutor::start()
     executor->setReadProgressCallback(pipeline.getReadProgressCallback());
 
     if (!executor->executeStep(&input_wait_flag))
-        throw Exception(ErrorCodes::LOGICAL_ERROR,
-                        "Pipeline for PushingPipelineExecutor was finished before all data was inserted");
+        throwOnExecutionStatus(executor->getExecutionStatus());
 }
 
 void PushingPipelineExecutor::push(Chunk chunk)
@@ -101,8 +112,7 @@ void PushingPipelineExecutor::push(Chunk chunk)
     pushing_source->setData(std::move(chunk));
 
     if (!executor->executeStep(&input_wait_flag))
-        throw Exception(ErrorCodes::LOGICAL_ERROR,
-                        "Pipeline for PushingPipelineExecutor was finished before all data was inserted");
+        throwOnExecutionStatus(executor->getExecutionStatus());
 }
 
 void PushingPipelineExecutor::push(Block block)
@@ -117,7 +127,10 @@ void PushingPipelineExecutor::finish()
     finished = true;
 
     if (executor)
-        executor->executeStep();
+    {
+        auto res = executor->executeStep();
+        chassert(!res);
+    }
 }
 
 void PushingPipelineExecutor::cancel()

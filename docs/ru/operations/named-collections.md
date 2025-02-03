@@ -27,7 +27,7 @@ $ cat /etc/clickhouse-server/config.d/named_collections.xml
 
 ## Именованные соединения для доступа к S3
 
-Описание параметров смотри [Табличная Функция S3](../sql-reference/table-functions/s3.md).
+Описание параметров смотрите [Табличная Функция S3](../sql-reference/table-functions/s3.md).
 
 Пример конфигурации:
 ```xml
@@ -75,7 +75,7 @@ SELECT * FROM s3_engine_table LIMIT 3;
 
 ## Пример использования именованных соединений с базой данных MySQL
 
-Описание параметров смотри [mysql](../sql-reference/table-functions/mysql.md).
+Описание параметров смотрите [mysql](../sql-reference/table-functions/mysql.md).
 
 Пример конфигурации:
 ```xml
@@ -88,7 +88,6 @@ SELECT * FROM s3_engine_table LIMIT 3;
             <port>3306</port>
             <database>test</database>
             <connection_pool_size>8</connection_pool_size>
-            <on_duplicate_clause>1</on_duplicate_clause>
             <replace_query>1</replace_query>
         </mymysql>
     </named_collections>
@@ -147,7 +146,30 @@ SELECT dictGet('dict', 'B', 2);
 
 ## Пример использования именованных соединений с базой данных PostgreSQL
 
-Описание параметров смотри [postgresql](../sql-reference/table-functions/postgresql.md).
+Описание параметров смотрите [postgresql](../sql-reference/table-functions/postgresql.md). Дополнительно есть алиасы: 
+- `username` для `user`
+- `db` для `database`.
+
+Параметр `addresses_expr` используется в коллекции вместо `host:port`. Параметр опционален, потому что есть так же другие: `host`, `hostname`, `port`. Следующий псевдокод показывает приоритет:
+
+```sql
+CASE 
+    WHEN collection['addresses_expr'] != '' THEN collection['addresses_expr']
+    WHEN collection['host'] != ''           THEN collection['host'] || ':' || if(collection['port'] != '', collection['port'], '5432')
+    WHEN collection['hostname'] != ''       THEN collection['hostname'] || ':' || if(collection['port'] != '', collection['port'], '5432')
+END
+```
+
+Пример создания:
+```sql
+CREATE NAMED COLLECTION mypg AS
+user = 'pguser',
+password = 'jw8s0F4',
+host = '127.0.0.1',
+port = 5432,
+database = 'test',
+schema = 'test_schema'
+```
 
 Пример конфигурации:
 ```xml
@@ -200,6 +222,10 @@ SELECT * FROM mypgtable;
 └───┘
 ```
 
+:::note
+PostgreSQL копирует данные из named collection при создании таблицы. Изменения в коллекции не влияют на существующие таблицы.
+:::
+
 ### Пример использования именованных соединений базой данных с движком PostgreSQL
 
 ```sql
@@ -225,5 +251,60 @@ SELECT dictGet('dict', 'b', 2);
 
 ┌─dictGet('dict', 'b', 2)─┐
 │ two                     │
+└─────────────────────────┘
+```
+
+## Пример использования именованных соединений с удалённой базой данных Сlickhouse
+
+Описание параметров смотрите [remote](../sql-reference/table-functions/remote.md).
+
+Пример конфигурации:
+```xml
+<clickhouse>
+    <named_collections>
+        <remote1>
+            <host>remote_host</host>
+            <port>9000</port>
+            <database>system</database>
+            <user>foo</user>
+            <password>secret</password>
+        </remote1>
+    </named_collections>
+</clickhouse>
+```
+
+### Пример использования именованных соединений с табличной функцией remote/remoteSecure
+
+```sql
+SELECT * FROM remote(remote1, table = one);
+┌─dummy─┐
+│     0 │
+└───────┘
+
+SELECT * FROM remote(remote1, database = merge(system, '^one'));
+┌─dummy─┐
+│     0 │
+└───────┘
+
+INSERT INTO FUNCTION remote(remote1, database = default, table = test) VALUES (1,'a');
+
+SELECT * FROM remote(remote1, database = default, table = test);
+┌─a─┬─b─┐
+│ 1 │ a │
+└───┴───┘
+```
+
+### Пример использования именованных соединений с внешним словарем с источником удалённым сервером Clickhouse
+
+```sql
+CREATE DICTIONARY dict(a Int64, b String)
+PRIMARY KEY a
+SOURCE(CLICKHOUSE(NAME remote1 TABLE test DB default))
+LIFETIME(MIN 1 MAX 2)
+LAYOUT(HASHED());
+
+SELECT dictGet('dict', 'b', 1);
+┌─dictGet('dict', 'b', 1)─┐
+│ a                       │
 └─────────────────────────┘
 ```

@@ -4,7 +4,6 @@
 #include <Disks/IDisk.h>
 #include <IO/WriteBuffer.h>
 #include <Storages/KeyDescription.h>
-#include <Storages/MergeTree/IPartMetadataManager.h>
 #include <Core/Field.h>
 
 namespace DB
@@ -16,6 +15,7 @@ struct FormatSettings;
 struct MergeTreeDataPartChecksums;
 struct StorageInMemoryMetadata;
 class IDataPartStorage;
+class IMergeTreeDataPart;
 
 using StorageMetadataPtr = std::shared_ptr<const StorageInMemoryMetadata>;
 using MutableDataPartStoragePtr = std::shared_ptr<IDataPartStorage>;
@@ -40,11 +40,13 @@ public:
 
     void serializeText(const MergeTreeData & storage, WriteBuffer & out, const FormatSettings & format_settings) const;
 
-    void load(const MergeTreeData & storage, const PartMetadataManagerPtr & manager);
+    void load(const MergeTreeData & storage, const IMergeTreeDataPart & part);
 
     /// Store functions return write buffer with written but not finalized data.
     /// User must call finish() for returned object.
-    [[nodiscard]] std::unique_ptr<WriteBufferFromFileBase> store(const MergeTreeData & storage, IDataPartStorage & data_part_storage, MergeTreeDataPartChecksums & checksums) const;
+    [[nodiscard]] std::unique_ptr<WriteBufferFromFileBase> store(
+        StorageMetadataPtr metadata_snapshot, ContextPtr storage_context,
+        IDataPartStorage & data_part_storage, MergeTreeDataPartChecksums & checksums) const;
     [[nodiscard]] std::unique_ptr<WriteBufferFromFileBase> store(const Block & partition_key_sample, IDataPartStorage & data_part_storage, MergeTreeDataPartChecksums & checksums, const WriteSettings & settings) const;
 
     void assign(const MergeTreePartition & other) { value = other.value; }

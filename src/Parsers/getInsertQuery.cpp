@@ -19,10 +19,12 @@ std::string getInsertQuery(const std::string & db_name, const std::string & tabl
         query.columns->children.emplace_back(std::make_shared<ASTIdentifier>(column.name));
 
     WriteBufferFromOwnString buf;
-    IAST::FormatSettings settings(buf, true);
-    settings.always_quote_identifiers = true;
-    settings.identifier_quoting_style = quoting;
-    query.IAST::format(settings);
+    IAST::FormatSettings settings(
+        /*one_line=*/true,
+        /*hilite=*/false,
+        /*identifier_quoting_rule=*/IdentifierQuotingRule::WhenNecessary,
+        /*identifier_quoting_style=*/quoting);
+    query.IAST::format(buf, settings);
     return buf.str();
 }
 }

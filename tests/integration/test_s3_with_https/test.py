@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+
 from helpers.cluster import ClickHouseCluster
 
 
@@ -56,7 +57,7 @@ def test_s3_with_https(cluster, policy):
         == "(0,'data'),(1,'data')"
     )
 
-    node.query("DROP TABLE IF EXISTS s3_test NO DELAY")
+    node.query("DROP TABLE IF EXISTS s3_test SYNC")
 
     if policy.find("proxy") != -1:
         check_proxy_logs(cluster, "proxy1")

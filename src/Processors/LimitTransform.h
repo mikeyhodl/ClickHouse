@@ -1,8 +1,8 @@
 #pragma once
 
-#include <Processors/IProcessor.h>
-#include <Processors/RowsBeforeLimitCounter.h>
 #include <Core/SortDescription.h>
+#include <Processors/IProcessor.h>
+#include <Processors/RowsBeforeStepCounter.h>
 
 namespace DB
 {
@@ -15,7 +15,7 @@ namespace DB
 ///
 /// always_read_till_end - read all data from input ports even if limit was reached.
 /// with_ties, description - implementation of LIMIT WITH TIES. It works only for single port.
-class LimitTransform : public IProcessor
+class LimitTransform final : public IProcessor
 {
 private:
     UInt64 limit;
@@ -30,7 +30,7 @@ private:
     std::vector<size_t> sort_column_positions;
 
     UInt64 rows_read = 0; /// including the last read block
-    RowsBeforeLimitCounterPtr rows_before_limit_at_least;
+    RowsBeforeStepCounterPtr rows_before_limit_at_least;
 
     /// State of port's pair.
     /// Chunks from different port pairs are not mixed for better cache locality.
@@ -41,6 +41,11 @@ private:
         InputPort * input_port = nullptr;
         OutputPort * output_port = nullptr;
         bool is_finished = false;
+
+        /// This flag is used to avoid counting rows multiple times before applying a limit
+        /// condition, which can happen through certain input ports like PartialSortingTransform and
+        /// RemoteSource.
+        bool input_port_has_counter = false;
     };
 
     std::vector<PortsData> ports_data;
@@ -66,7 +71,8 @@ public:
     InputPort & getInputPort() { return inputs.front(); }
     OutputPort & getOutputPort() { return outputs.front(); }
 
-    void setRowsBeforeLimitCounter(RowsBeforeLimitCounterPtr counter) { rows_before_limit_at_least.swap(counter); }
+    void setRowsBeforeLimitCounter(RowsBeforeStepCounterPtr counter) override { rows_before_limit_at_least.swap(counter); }
+    void setInputPortHasCounter(size_t pos) { ports_data[pos].input_port_has_counter = true; }
 };
 
 }

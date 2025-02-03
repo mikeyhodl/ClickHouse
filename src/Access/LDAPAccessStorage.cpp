@@ -26,7 +26,6 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
 }
 
-
 LDAPAccessStorage::LDAPAccessStorage(const String & storage_name_, AccessControl & access_control_, const Poco::Util::AbstractConfiguration & config, const String & prefix)
     : IAccessStorage(storage_name_), access_control(access_control_), memory_storage(storage_name_, access_control.getChangesNotifier(), false)
 {
@@ -36,14 +35,14 @@ LDAPAccessStorage::LDAPAccessStorage(const String & storage_name_, AccessControl
 
 String LDAPAccessStorage::getLDAPServerName() const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return ldap_server_name;
 }
 
 
 void LDAPAccessStorage::setConfiguration(const Poco::Util::AbstractConfiguration & config, const String & prefix)
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
 
     // TODO: switch to passing config as a ConfigurationView and remove this extra prefix once a version of Poco with proper implementation is available.
     const String prefix_str = (prefix.empty() ? "" : prefix + ".");
@@ -53,11 +52,11 @@ void LDAPAccessStorage::setConfiguration(const Poco::Util::AbstractConfiguration
     const bool has_role_mapping = config.has(prefix_str + "role_mapping");
 
     if (!has_server)
-        throw Exception("Missing 'server' field for LDAP user directory", ErrorCodes::BAD_ARGUMENTS);
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Missing 'server' field for LDAP user directory");
 
     const auto ldap_server_name_cfg = config.getString(prefix_str + "server");
     if (ldap_server_name_cfg.empty())
-        throw Exception("Empty 'server' field for LDAP user directory", ErrorCodes::BAD_ARGUMENTS);
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Empty 'server' field for LDAP user directory");
 
     std::set<String> common_roles_cfg;
     if (has_roles)
@@ -76,7 +75,7 @@ void LDAPAccessStorage::setConfiguration(const Poco::Util::AbstractConfiguration
         config.keys(prefix, all_keys);
         for (const auto & key : all_keys)
         {
-            if (key == "role_mapping" || key.find("role_mapping[") == 0)
+            if (key == "role_mapping" || key.starts_with("role_mapping["))
                 parseLDAPRoleSearchParams(role_search_params_cfg.emplace_back(), config, prefix_str + key);
         }
     }
@@ -94,7 +93,7 @@ void LDAPAccessStorage::setConfiguration(const Poco::Util::AbstractConfiguration
     role_change_subscription = access_control.subscribeForChanges<Role>(
         [this] (const UUID & id, const AccessEntityPtr & entity)
         {
-            return this->processRoleChange(id, entity);
+            this->processRoleChange(id, entity);
         }
     );
 }
@@ -102,7 +101,7 @@ void LDAPAccessStorage::setConfiguration(const Poco::Util::AbstractConfiguration
 
 void LDAPAccessStorage::processRoleChange(const UUID & id, const AccessEntityPtr & entity)
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     const auto role = typeid_cast<std::shared_ptr<const Role>>(entity);
     const auto it = granted_role_names.find(id);
 
@@ -163,7 +162,7 @@ void LDAPAccessStorage::applyRoleChangeNoLock(bool grant, const UUID & role_id, 
     // Update the granted roles of the relevant users.
     if (!user_ids.empty())
     {
-        auto update_func = [&role_id, &grant] (const AccessEntityPtr & entity_) -> AccessEntityPtr
+        auto update_func = [&role_id, &grant] (const AccessEntityPtr & entity_, const UUID &) -> AccessEntityPtr
         {
             if (auto user = typeid_cast<std::shared_ptr<const User>>(entity_))
             {
@@ -191,8 +190,8 @@ void LDAPAccessStorage::applyRoleChangeNoLock(bool grant, const UUID & role_id, 
     }
     else
     {
-        granted_role_names.erase(role_id);
         granted_role_ids.erase(role_name);
+        granted_role_names.erase(role_id);
     }
 }
 
@@ -200,11 +199,11 @@ void LDAPAccessStorage::applyRoleChangeNoLock(bool grant, const UUID & role_id, 
 void LDAPAccessStorage::assignRolesNoLock(User & user, const LDAPClient::SearchResultsList & external_roles) const
 {
     const auto external_roles_hash = boost::hash<LDAPClient::SearchResultsList>{}(external_roles);
-    return assignRolesNoLock(user, external_roles, external_roles_hash);
+    assignRolesNoLock(user, external_roles, external_roles_hash);
 }
 
 
-void LDAPAccessStorage::assignRolesNoLock(User & user, const LDAPClient::SearchResultsList & external_roles, const std::size_t external_roles_hash) const
+void LDAPAccessStorage::assignRolesNoLock(User & user, const LDAPClient::SearchResultsList & external_roles, std::size_t external_roles_hash) const
 {
     const auto & user_name = user.getName();
     auto & granted_roles = user.granted_roles;
@@ -301,7 +300,7 @@ void LDAPAccessStorage::updateAssignedRolesNoLock(const UUID & id, const String 
     if (it != external_role_hashes.end() && it->second == external_roles_hash)
         return;
 
-    auto update_func = [this, &external_roles, external_roles_hash] (const AccessEntityPtr & entity_) -> AccessEntityPtr
+    auto update_func = [this, &external_roles, external_roles_hash] (const AccessEntityPtr & entity_, const UUID &) -> AccessEntityPtr
     {
         if (auto user = typeid_cast<std::shared_ptr<const User>>(entity_))
         {
@@ -320,8 +319,12 @@ std::set<String> LDAPAccessStorage::mapExternalRolesNoLock(const LDAPClient::Sea
 {
     std::set<String> role_names;
 
+    // If this node can't access LDAP server (or has not privileges to fetch roles) and gets empty list of external roles
+    if (external_roles.empty())
+        return role_names;
+
     if (external_roles.size() != role_search_params.size())
-        throw Exception("Unable to map external roles", ErrorCodes::BAD_ARGUMENTS);
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unable to map external roles");
 
     for (std::size_t i = 0; i < external_roles.size(); ++i)
     {
@@ -330,10 +333,7 @@ std::set<String> LDAPAccessStorage::mapExternalRolesNoLock(const LDAPClient::Sea
 
         for (const auto & external_role : external_role_set)
         {
-            if (
-                prefix.size() < external_role.size() &&
-                external_role.compare(0, prefix.size(), prefix) == 0
-            )
+            if (prefix.size() < external_role.size() && external_role.starts_with(prefix))
             {
                 role_names.emplace(external_role, prefix.size());
             }
@@ -371,7 +371,7 @@ const char * LDAPAccessStorage::getStorageType() const
 
 String LDAPAccessStorage::getStorageParamsJSON() const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     Poco::JSON::Object params_json;
 
     params_json.set("server", ldap_server_name);
@@ -417,40 +417,40 @@ String LDAPAccessStorage::getStorageParamsJSON() const
 
 std::optional<UUID> LDAPAccessStorage::findImpl(AccessEntityType type, const String & name) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return memory_storage.find(type, name);
 }
 
 
 std::vector<UUID> LDAPAccessStorage::findAllImpl(AccessEntityType type) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return memory_storage.findAll(type);
 }
 
 
 bool LDAPAccessStorage::exists(const UUID & id) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return memory_storage.exists(id);
 }
 
 
 AccessEntityPtr LDAPAccessStorage::readImpl(const UUID & id, bool throw_if_not_exists) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return memory_storage.read(id, throw_if_not_exists);
 }
 
 
 std::optional<std::pair<String, AccessEntityType>> LDAPAccessStorage::readNameWithTypeImpl(const UUID & id, bool throw_if_not_exists) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     return memory_storage.readNameWithType(id, throw_if_not_exists);
 }
 
 
-std::optional<UUID> LDAPAccessStorage::authenticateImpl(
+std::optional<AuthResult> LDAPAccessStorage::authenticateImpl(
     const Credentials & credentials,
     const Poco::Net::IPAddress & address,
     const ExternalAuthenticators & external_authenticators,
@@ -458,7 +458,7 @@ std::optional<UUID> LDAPAccessStorage::authenticateImpl(
     bool /* allow_no_password */,
     bool /* allow_plaintext_password */) const
 {
-    std::scoped_lock lock(mutex);
+    std::lock_guard lock(mutex);
     auto id = memory_storage.find<User>(credentials.getUserName());
     UserPtr user = id ? memory_storage.read<User>(*id) : nullptr;
 
@@ -468,8 +468,8 @@ std::optional<UUID> LDAPAccessStorage::authenticateImpl(
         // User does not exist, so we create one, and will add it if authentication is successful.
         new_user = std::make_shared<User>();
         new_user->setName(credentials.getUserName());
-        new_user->auth_data = AuthenticationData(AuthenticationType::LDAP);
-        new_user->auth_data.setLDAPServerName(ldap_server_name);
+        new_user->authentication_methods.emplace_back(AuthenticationType::LDAP);
+        new_user->authentication_methods.back().setLDAPServerName(ldap_server_name);
         user = new_user;
     }
 
@@ -503,7 +503,9 @@ std::optional<UUID> LDAPAccessStorage::authenticateImpl(
         updateAssignedRolesNoLock(*id, user->getName(), external_roles);
     }
 
-    return id;
+    if (id)
+        return AuthResult{ .user_id = *id, .authentication_data = AuthenticationData(AuthenticationType::LDAP) };
+    return std::nullopt;
 }
 
 }

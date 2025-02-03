@@ -1,27 +1,21 @@
 #pragma once
 
 #include <Disks/IStoragePolicy.h>
-#include <Disks/DiskSelector.h>
 #include <Disks/IDisk.h>
-#include <Disks/IVolume.h>
-#include <Disks/VolumeJBOD.h>
-#include <Disks/SingleDiskVolume.h>
-#include <IO/WriteHelpers.h>
-#include <Common/CurrentMetrics.h>
-#include <Common/Exception.h>
-#include <Common/formatReadable.h>
-#include <Common/logger_useful.h>
 
 #include <memory>
-#include <mutex>
 #include <unordered_map>
-#include <unistd.h>
-#include <boost/noncopyable.hpp>
-#include <Poco/Util/AbstractConfiguration.h>
+
+namespace Poco::Util
+{
+    class AbstractConfiguration;
+};
 
 
 namespace DB
 {
+class DiskSelector;
+using DiskSelectorPtr = std::shared_ptr<const DiskSelector>;
 
 /**
  * Contains all information about volumes configuration for Storage.
@@ -92,6 +86,7 @@ public:
     bool hasAnyVolumeWithDisabledMerges() const override;
 
     bool containsVolume(const String & volume_name) const override;
+
 private:
     Volumes volumes;
     const String name;
@@ -105,7 +100,7 @@ private:
 
     void buildVolumeIndices();
 
-    Poco::Logger * log;
+    LoggerPtr log;
 };
 
 
@@ -118,15 +113,24 @@ using StoragePoliciesMap = std::map<String, StoragePolicyPtr>;
 class StoragePolicySelector
 {
 public:
+    static constexpr auto TMP_STORAGE_POLICY_PREFIX = "__";
+
     StoragePolicySelector(const Poco::Util::AbstractConfiguration & config, const String & config_prefix, DiskSelectorPtr disks);
 
-    StoragePolicySelectorPtr updateFromConfig(const Poco::Util::AbstractConfiguration & config, const String & config_prefix, DiskSelectorPtr disks) const;
+    StoragePolicySelectorPtr updateFromConfig(const Poco::Util::AbstractConfiguration & config, const String & config_prefix, DiskSelectorPtr disks, Strings & new_disks) const;
 
     /// Policy by name
     StoragePolicyPtr get(const String & name) const;
 
+    StoragePolicyPtr tryGet(const String & name) const;
+
     /// All policies
     const StoragePoliciesMap & getPoliciesMap() const { return policies; }
+
+    /// Add storage policy to StoragePolicySelector.
+    /// Used when storage policy needs to be created on the fly, not being present in config file.
+    /// Done by getOrSetStoragePolicyForSingleDisk.
+    void add(StoragePolicyPtr storage_policy);
 
 private:
     StoragePoliciesMap policies;

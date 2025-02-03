@@ -403,3 +403,8 @@ select * from (explain plan actions = 1 select * from (select * from tab union a
         Sort description: multiply(plus(a, b), c) ASC, sin(divide(a, b)) ASC, d ASC
         Limit 3
             ReadType: Default
+drop table if exists tab;
+drop table if exists tab2;
+drop table if exists tab3;
+drop table if exists tab4;
+drop table if exists tab5;

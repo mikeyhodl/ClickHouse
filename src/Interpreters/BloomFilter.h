@@ -37,6 +37,7 @@ public:
     /// seed -- random seed for hash functions generation.
     BloomFilter(size_t size_, size_t hashes_, size_t seed_);
 
+    void resize(size_t size_);
     bool find(const char * data, size_t len);
     void add(const char * data, size_t len);
     void clear();
@@ -53,6 +54,8 @@ public:
 
     /// For debug.
     UInt64 isEmpty() const;
+
+    size_t memoryUsageBytes() const;
 
     friend bool operator== (const BloomFilter & a, const BloomFilter & b);
 private:

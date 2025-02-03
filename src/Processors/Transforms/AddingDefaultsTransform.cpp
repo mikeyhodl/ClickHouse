@@ -9,6 +9,7 @@
 #include <Columns/ColumnsCommon.h>
 #include <Columns/ColumnDecimal.h>
 #include <Columns/ColumnConst.h>
+#include <Columns/ColumnSparse.h>
 #include <Columns/FilterDescription.h>
 
 #include <DataTypes/DataTypesNumber.h>
@@ -19,6 +20,7 @@
 #include <DataTypes/DataTypeDateTime64.h>
 #include <DataTypes/DataTypeEnum.h>
 #include <DataTypes/DataTypeUUID.h>
+#include <DataTypes/DataTypeIPv4andIPv6.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeFixedString.h>
 
@@ -41,13 +43,13 @@ static void checkCalculated(const ColumnWithTypeAndName & col_read,
     size_t column_size = col_read.column->size();
 
     if (column_size != col_defaults.column->size())
-        throw Exception("Mismatch column sizes while adding defaults", ErrorCodes::SIZES_OF_COLUMNS_DOESNT_MATCH);
+        throw Exception(ErrorCodes::SIZES_OF_COLUMNS_DOESNT_MATCH, "Mismatch column sizes while adding defaults");
 
     if (column_size < defaults_needed)
-        throw Exception("Unexpected defaults count", ErrorCodes::SIZES_OF_COLUMNS_DOESNT_MATCH);
+        throw Exception(ErrorCodes::SIZES_OF_COLUMNS_DOESNT_MATCH, "Unexpected defaults count");
 
     if (!col_read.type->equals(*col_defaults.type))
-        throw Exception("Mismatch column types while adding defaults", ErrorCodes::TYPE_MISMATCH);
+        throw Exception(ErrorCodes::TYPE_MISMATCH, "Mismatch column types while adding defaults");
 }
 
 static void mixNumberColumns(
@@ -82,7 +84,7 @@ static void mixNumberColumns(
 
                 return true;
             }
-            else if (auto col_defs = checkAndGetColumn<ColVecType>(col_defaults.get()))
+            if (auto col_defs = checkAndGetColumn<ColVecType>(col_defaults.get()))
             {
                 auto & src = col_defs->getData();
                 for (size_t i = 0; i < defaults_mask.size(); ++i)
@@ -97,7 +99,7 @@ static void mixNumberColumns(
     };
 
     if (!callOnIndexAndDataType<void>(type_idx, call))
-        throw Exception("Unexpected type on mixNumberColumns", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected type on mixNumberColumns");
 }
 
 static MutableColumnPtr mixColumns(const ColumnWithTypeAndName & col_read,
@@ -148,8 +150,8 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
     if (column_defaults.empty())
         return;
 
-    const BlockMissingValues & block_missing_values = input_format.getMissingValues();
-    if (block_missing_values.empty())
+    const auto * block_missing_values = input_format.getMissingValues();
+    if (!block_missing_values)
         return;
 
     const auto & header = getOutputPort().getHeader();
@@ -166,7 +168,7 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
         if (evaluate_block.has(column.first))
         {
             size_t column_idx = res.getPositionByName(column.first);
-            if (block_missing_values.hasDefaultBits(column_idx))
+            if (block_missing_values->hasDefaultBits(column_idx))
                 evaluate_block.erase(column.first);
         }
     }
@@ -177,13 +179,13 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
     auto dag = evaluateMissingDefaults(evaluate_block, header.getNamesAndTypesList(), columns, context, false);
     if (dag)
     {
-        auto actions = std::make_shared<ExpressionActions>(std::move(dag), ExpressionActionsSettings::fromContext(context, CompileExpressions::yes));
+        auto actions = std::make_shared<ExpressionActions>(std::move(*dag), ExpressionActionsSettings(context, CompileExpressions::yes), true);
         actions->execute(evaluate_block);
     }
 
     std::unordered_map<size_t, MutableColumnPtr> mixed_columns;
 
-    for (const ColumnWithTypeAndName & column_def : evaluate_block)
+    for (auto & column_def : evaluate_block)
     {
         const String & column_name = column_def.name;
 
@@ -192,12 +194,15 @@ void AddingDefaultsTransform::transform(Chunk & chunk)
 
         size_t block_column_position = res.getPositionByName(column_name);
         ColumnWithTypeAndName & column_read = res.getByPosition(block_column_position);
-        const auto & defaults_mask = block_missing_values.getDefaultsBitmask(block_column_position);
+        const auto & defaults_mask = block_missing_values->getDefaultsBitmask(block_column_position);
 
         checkCalculated(column_read, column_def, defaults_mask.size());
 
         if (!defaults_mask.empty())
         {
+            column_read.column = recursiveRemoveSparse(column_read.column);
+            column_def.column = recursiveRemoveSparse(column_def.column);
+
             /// TODO: FixedString
             if (isColumnedAsNumber(column_read.type) || isDecimal(column_read.type))
             {

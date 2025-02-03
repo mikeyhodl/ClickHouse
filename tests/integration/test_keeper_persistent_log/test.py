@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-import pytest
-from helpers.cluster import ClickHouseCluster
+import os
 import random
 import string
-import os
 import time
+
+import pytest
 from kazoo.client import KazooClient, KazooState
 
+from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 
@@ -163,7 +164,6 @@ def test_state_duplicate_restart(started_cluster):
 
 # http://zookeeper-user.578899.n2.nabble.com/Why-are-ephemeral-nodes-written-to-disk-tp7583403p7583418.html
 def test_ephemeral_after_restart(started_cluster):
-
     try:
         node_zk = None
         node_zk2 = None

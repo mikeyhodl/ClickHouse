@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Tags: long, zookeeper
+# Tags: zookeeper, no-shared-merge-tree, long
+# no-shared-merge-tree: depend on local fs
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -27,7 +28,8 @@ path=$($CLICKHOUSE_CLIENT -q "select path from system.parts where database='$CLI
 $CLICKHOUSE_CLIENT -q "select throwIf(substring('$path', 1, 1) != '/', 'Path is relative: $path')" || exit
 rm -rf $path
 
-$CLICKHOUSE_CLIENT -q "select * from rmt1;" 2>/dev/null
+$CLICKHOUSE_CLIENT -q "select * from rmt1;" 2>&1 | grep LOGICAL_ERROR
+$CLICKHOUSE_CLIENT --min_bytes_to_use_direct_io=1 --local_filesystem_read_method=pread_threadpool -q "select * from rmt1;" 2>&1 | grep LOGICAL_ERROR
 
 $CLICKHOUSE_CLIENT -q "detach table rmt1;"
 $CLICKHOUSE_CLIENT -q "attach table rmt1;"

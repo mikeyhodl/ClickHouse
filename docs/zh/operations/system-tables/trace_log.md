@@ -22,7 +22,7 @@ ClickHouse创建此表时 [trace_log](../../operations/server-configuration-para
 
 -   `revision` ([UInt32](../../sql-reference/data-types/int-uint.md)) — ClickHouse server build revision.
 
-    通过以下方式连接到服务器 `clickhouse-client`，你看到的字符串类似于 `Connected to ClickHouse server version 19.18.1 revision 54429.`. 该字段包含 `revision`，但不是 `version` 的服务器。
+    通过以下方式连接到服务器 `clickhouse-client`，你看到的字符串类似于 `Connected to ClickHouse server version 19.18.1.`. 该字段包含 `revision`，但不是 `version` 的服务器。
 
 -   `timer_type` ([枚举8](../../sql-reference/data-types/enum.md)) — Timer type:
 
@@ -31,7 +31,7 @@ ClickHouse创建此表时 [trace_log](../../operations/server-configuration-para
 
 -   `thread_number` ([UInt32](../../sql-reference/data-types/int-uint.md)) — Thread identifier.
 
--   `query_id` ([字符串](../../sql-reference/data-types/string.md)) — Query identifier that can be used to get details about a query that was running from the [query_log](#system_tables-query_log) 系统表.
+-   `query_id` ([字符串](../../sql-reference/data-types/string.md)) — Query identifier that can be used to get details about a query that was running from the [query_log](/docs/zh/operations/system-tables/query_log) 系统表.
 
 -   `trace` ([数组(UInt64)](../../sql-reference/data-types/array.md)) — Stack trace at the moment of sampling. Each element is a virtual memory address inside ClickHouse server process.
 

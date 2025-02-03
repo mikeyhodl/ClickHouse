@@ -37,7 +37,7 @@ ClickHouse会使用服务器上一切可用的资源，从而以最自然的方�
 
 ## 支持SQL {#zhi-chi-sql}
 
-ClickHouse支持一种[基于SQL的声明式查询语言](../sql-reference/index.md)，它在许多情况下与[ANSI SQL标准](../sql-reference/ansi.md)相同。
+ClickHouse支持一种基于SQL的声明式查询语言。
 
 支持的查询[GROUP BY](../sql-reference/statements/select/group-by.md), [ORDER BY](../sql-reference/statements/select/order-by.md), [FROM](../sql-reference/statements/select/from.md), [JOIN](../sql-reference/statements/select/join.md), [IN](../sql-reference/operators/in.md)以及非相关子查询。
 
@@ -86,5 +86,3 @@ ClickHouse使用SQL查询实现用户帐户管理，并允许[角色的访问控
 1.  没有完整的事务支持。
 2.  缺少高频率，低延迟的修改或删除已存在数据的能力。仅能用于批量删除或修改数据，但这符合 [GDPR](https://gdpr-info.eu)。
 3.  稀疏索引使得ClickHouse不适合通过其键检索单行的点查询。
-
-[来源文章](https://clickhouse.com/docs/en/introduction/distinctive_features/) <!--hide-->

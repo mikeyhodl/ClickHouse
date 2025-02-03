@@ -1,3 +1,4 @@
+#include <AggregateFunctions/IAggregateFunction.h>
 #include <Interpreters/AggregationUtils.h>
 
 namespace DB
@@ -45,7 +46,7 @@ OutputBlockColumns prepareOutputBlockColumns(
         }
         else
         {
-            final_aggregate_columns[i] = aggregate_functions[i]->getReturnType()->createColumn();
+            final_aggregate_columns[i] = aggregate_functions[i]->getResultType()->createColumn();
             final_aggregate_columns[i]->reserve(rows);
 
             if (aggregate_functions[i]->isState())
@@ -65,7 +66,7 @@ OutputBlockColumns prepareOutputBlockColumns(
     }
 
     if (key_columns.size() != params.keys_size)
-        throw Exception{"Aggregate. Unexpected key columns size.", ErrorCodes::LOGICAL_ERROR};
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Aggregate. Unexpected key columns size.");
 
     std::vector<IColumn *> raw_key_columns;
     raw_key_columns.reserve(key_columns.size());

@@ -1,27 +1,23 @@
 ---
 slug: /en/development/style
-sidebar_position: 69
-sidebar_label: C++ Guide
-description: A list of recommendations regarding coding style, naming convention, formatting and more
+sidebar_position: 70
+sidebar_label: C++ Style Guide
 ---
 
-# How to Write C++ Code
+# C++ Style Guide
 
 ## General Recommendations {#general-recommendations}
 
-**1.** The following are recommendations, not requirements.
-
-**2.** If you are editing code, it makes sense to follow the formatting of the existing code.
-
-**3.** Code style is needed for consistency. Consistency makes it easier to read the code, and it also makes it easier to search the code.
-
-**4.** Many of the rules do not have logical reasons; they are dictated by established practices.
+The following are recommendations, not requirements.
+If you are editing code, it makes sense to follow the formatting of the existing code.
+Code style is needed for consistency. Consistency makes it easier to read the code, and it also makes it easier to search the code.
+Many of the rules do not have logical reasons; they are dictated by established practices.
 
 ## Formatting {#formatting}
 
-**1.** Most of the formatting will be done automatically by `clang-format`.
+**1.** Most of the formatting is done automatically by `clang-format`.
 
-**2.** Indents are 4 spaces. Configure your development environment so that a tab adds four spaces.
+**2.** Indents is 4 spaces. Configure your development environment so that a tab adds four spaces.
 
 **3.** Opening and closing curly brackets must be on a separate line.
 
@@ -57,7 +53,7 @@ memcpy(&buf[place_value], &x, sizeof(x));
 for (size_t i = 0; i < rows; i += storage.index_granularity)
 ```
 
-**7.** Add spaces around binary operators (`+`, `-`, `*`, `/`, `%`, …) and the ternary operator `?:`.
+**7.** Add spaces around binary operators (`+`, `-`, `*`, `/`, `%`, ...) and the ternary operator `?:`.
 
 ``` cpp
 UInt16 year = (s[0] - '0') * 1000 + (s[1] - '0') * 100 + (s[2] - '0') * 10 + (s[3] - '0');
@@ -86,7 +82,7 @@ dst.ClickGoodEvent     = click.GoodEvent;
 
 If necessary, the operator can be wrapped to the next line. In this case, the offset in front of it is increased.
 
-**11.** Do not use a space to separate unary operators (`--`, `++`, `*`, `&`, …) from the argument.
+**11.** Do not use a space to separate unary operators (`--`, `++`, `*`, `&`, ...) from the argument.
 
 **12.** Put a space after a comma, but not before it. The same rule goes for a semicolon inside a `for` expression.
 
@@ -115,7 +111,7 @@ public:
 
 **16.** If the same `namespace` is used for the entire file, and there isn’t anything else significant, an offset is not necessary inside `namespace`.
 
-**17.** If the block for an `if`, `for`, `while`, or other expression consists of a single `statement`, the curly brackets are optional. Place the `statement` on a separate line, instead. This rule is also valid for nested `if`, `for`, `while`, …
+**17.** If the block for an `if`, `for`, `while`, or other expression consists of a single `statement`, the curly brackets are optional. Place the `statement` on a separate line, instead. This rule is also valid for nested `if`, `for`, `while`, ...
 
 But if the inner `statement` contains curly brackets or `else`, the external block should be written in curly brackets.
 
@@ -345,7 +341,7 @@ struct ExtractDomain
 **7.** For abstract classes (interfaces) you can add the `I` prefix.
 
 ``` cpp
-class IBlockInputStream
+class IProcessor
 ```
 
 **8.** If you use a variable locally, you can use the short name.
@@ -370,8 +366,8 @@ If the file contains a single function, name the file the same way as the functi
 
 **11.** If the name contains an abbreviation, then:
 
--   For variable names, the abbreviation should use lowercase letters `mysql_connection` (not `mySQL_connection`).
--   For names of classes and functions, keep the uppercase letters in the abbreviation`MySQLConnection` (not `MySqlConnection`).
+- For variable names, the abbreviation should use lowercase letters `mysql_connection` (not `mySQL_connection`).
+- For names of classes and functions, keep the uppercase letters in the abbreviation`MySQLConnection` (not `MySqlConnection`).
 
 **12.** Constructor arguments that are used just to initialize the class members should be named the same way as the class members, but with an underscore at the end.
 
@@ -434,9 +430,9 @@ In application code, memory must be freed by the object that owns it.
 
 Examples:
 
--   The easiest way is to place an object on the stack, or make it a member of another class.
--   For a large number of small objects, use containers.
--   For automatic deallocation of a small number of objects that reside in the heap, use `shared_ptr/unique_ptr`.
+- The easiest way is to place an object on the stack, or make it a member of another class.
+- For a large number of small objects, use containers.
+- For automatic deallocation of a small number of objects that reside in the heap, use `shared_ptr/unique_ptr`.
 
 **2.** Resource management.
 
@@ -489,7 +485,7 @@ When using functions with response codes or `errno`, always check the result and
 
 ``` cpp
 if (0 != close(fd))
-    throwFromErrno("Cannot close file " + file_name, ErrorCodes::CANNOT_CLOSE_FILE);
+    throw ErrnoException(ErrorCodes::CANNOT_CLOSE_FILE, "Cannot close file {}", file_name);
 ```
 
 You can use assert to check invariant in code.
@@ -504,10 +500,10 @@ This is not recommended, but it is allowed.
 
 Use the following options:
 
--   Create a function (`done()` or `finalize()`) that will do all the work in advance that might lead to an exception. If that function was called, there should be no exceptions in the destructor later.
--   Tasks that are too complex (such as sending messages over the network) can be put in separate method that the class user will have to call before destruction.
--   If there is an exception in the destructor, it’s better to log it than to hide it (if the logger is available).
--   In simple applications, it is acceptable to rely on `std::terminate` (for cases of `noexcept` by default in C++11) to handle exceptions.
+- Create a function (`done()` or `finalize()`) that will do all the work in advance that might lead to an exception. If that function was called, there should be no exceptions in the destructor later.
+- Tasks that are too complex (such as sending messages over the network) can be put in separate method that the class user will have to call before destruction.
+- If there is an exception in the destructor, it’s better to log it than to hide it (if the logger is available).
+- In simple applications, it is acceptable to rely on `std::terminate` (for cases of `noexcept` by default in C++11) to handle exceptions.
 
 **6.** Anonymous code blocks.
 
@@ -529,11 +525,11 @@ ready_any.set();
 
 In offline data processing programs:
 
--   Try to get the best possible performance on a single CPU core. You can then parallelize your code if necessary.
+- Try to get the best possible performance on a single CPU core. You can then parallelize your code if necessary.
 
 In server applications:
 
--   Use the thread pool to process requests. At this point, we haven’t had any tasks that required userspace context switching.
+- Use the thread pool to process requests. At this point, we haven’t had any tasks that required userspace context switching.
 
 Fork is not used for parallelization.
 
@@ -870,5 +866,3 @@ function(
       const & RangesInDataParts ranges,
       size_t limit)
 ```
-
-[Original article](https://clickhouse.com/docs/en/development/style/) <!--hide-->

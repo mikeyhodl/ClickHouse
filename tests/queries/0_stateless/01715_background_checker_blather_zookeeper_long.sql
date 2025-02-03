@@ -1,4 +1,5 @@
--- Tags: long, zookeeper
+-- Tags: long, zookeeper, no-shared-merge-tree
+-- no-shared-merge-tree: no replication queue
 
 DROP TABLE IF EXISTS i20203_1 SYNC;
 DROP TABLE IF EXISTS i20203_2 SYNC;
@@ -18,6 +19,7 @@ DETACH TABLE i20203_1;
 ATTACH TABLE i20203_2;
 
 -- sleep 10 seconds
+SET function_sleep_max_microseconds_per_block = 10000000;
 SELECT number from numbers(10) where sleepEachRow(1) Format Null;
 
 SELECT num_tries < 50

@@ -44,6 +44,7 @@ public:
 private:
     void consume(Chunk chunk) override;
     void finalizeImpl() override;
+    void resetFormatterImpl() override;
 
     std::unique_ptr<orc::Type> getORCType(const DataTypePtr & type);
 
@@ -67,11 +68,6 @@ private:
                         GetSecondsFunc get_seconds, GetNanosecondsFunc get_nanoseconds);
 
     void writeColumn(orc::ColumnVectorBatch & orc_column, const IColumn & column, DataTypePtr & type, const PaddedPODArray<UInt8> * null_bytemap);
-
-    /// These two functions are needed to know maximum nested size of arrays to
-    /// create an ORC Batch with the appropriate size
-    size_t getColumnSize(const IColumn & column, DataTypePtr & type);
-    size_t getMaxColumnSize(Chunk & chunk);
 
     void prepareWriter();
 

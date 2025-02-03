@@ -4,16 +4,16 @@
 
 #include <Common/filesystemHelpers.h>
 #include <Common/FieldVisitorToString.h>
+#include <Common/quoteString.h>
 #include <DataTypes/FieldToDataType.h>
 
 #include <Processors/Sources/ShellCommandSource.h>
 #include <Processors/Sources/SourceFromSingleChunk.h>
 #include <Formats/formatBlock.h>
 
-#include <Functions/FunctionFactory.h>
 #include <Functions/FunctionHelpers.h>
+#include <Functions/IFunctionAdaptors.h>
 #include <Functions/UserDefined/ExternalUserDefinedExecutableFunctionsLoader.h>
-#include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <Interpreters/convertFieldToType.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/castColumn.h>
@@ -165,7 +165,7 @@ public:
 
             const auto & argument_type = argument.type;
 
-            if (areTypesEqual(arguments_copy[i].type, argument_type))
+            if (arguments_copy[i].type->equals(*argument_type))
                 continue;
 
             ColumnWithTypeAndName column_to_cast = {column_with_type.column, column_with_type.type, column_with_type.name};
