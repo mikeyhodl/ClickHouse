@@ -3,6 +3,7 @@
 #include "config.h"
 
 #if USE_ORC
+#include <Common/PODArray_fwd.h>
 #include <IO/WriteBuffer.h>
 #include <Processors/Formats/IOutputFormat.h>
 #include <Formats/FormatSettings.h>
@@ -44,6 +45,7 @@ public:
 private:
     void consume(Chunk chunk) override;
     void finalizeImpl() override;
+    void resetFormatterImpl() override;
 
     std::unique_ptr<orc::Type> getORCType(const DataTypePtr & type);
 
@@ -61,17 +63,12 @@ private:
     void writeStrings(orc::ColumnVectorBatch & orc_column, const IColumn & column, const PaddedPODArray<UInt8> * null_bytemap);
 
     /// ORC column TimestampVectorBatch stores only seconds and nanoseconds,
-    /// GetSecondsFunc and GetNanosecondsFunc are needed to extract them from DataTime type.
+    /// GetSecondsFunc and GetNanosecondsFunc are needed to extract them from DateTime type.
     template <typename ColumnType, typename GetSecondsFunc, typename GetNanosecondsFunc>
     void writeDateTimes(orc::ColumnVectorBatch & orc_column, const IColumn & column, const PaddedPODArray<UInt8> * null_bytemap,
                         GetSecondsFunc get_seconds, GetNanosecondsFunc get_nanoseconds);
 
     void writeColumn(orc::ColumnVectorBatch & orc_column, const IColumn & column, DataTypePtr & type, const PaddedPODArray<UInt8> * null_bytemap);
-
-    /// These two functions are needed to know maximum nested size of arrays to
-    /// create an ORC Batch with the appropriate size
-    size_t getColumnSize(const IColumn & column, DataTypePtr & type);
-    size_t getMaxColumnSize(Chunk & chunk);
 
     void prepareWriter();
 

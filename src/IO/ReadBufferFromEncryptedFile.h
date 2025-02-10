@@ -30,7 +30,7 @@ public:
 
     void setReadUntilEnd() override { in->setReadUntilEnd(); }
 
-    size_t getFileSize() override { return in->getFileSize(); }
+    std::optional<size_t> tryGetFileSize() override { return in->tryGetFileSize(); }
 
 private:
     bool nextImpl() override;
@@ -43,6 +43,8 @@ private:
 
     Memory<> encrypted_buffer;
     FileEncryption::Encryptor encryptor;
+
+    LoggerPtr log;
 };
 
 }

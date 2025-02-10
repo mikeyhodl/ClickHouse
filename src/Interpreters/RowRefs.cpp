@@ -1,10 +1,13 @@
 #include <Interpreters/RowRefs.h>
 
-#include <Common/RadixSort.h>
+#include <Columns/ColumnDecimal.h>
+#include <Columns/ColumnVector.h>
 #include <Columns/IColumn.h>
-#include <DataTypes/IDataType.h>
+#include <Common/assert_cast.h>
 #include <Core/Joins.h>
+#include <DataTypes/IDataType.h>
 #include <base/types.h>
+#include <Common/RadixSort.h>
 
 
 namespace DB
@@ -74,9 +77,8 @@ class SortedLookupVector : public SortedLookupVectorBase
 
 
 public:
-    using Keys = std::vector<TKey>;
-    using Entries = PaddedPODArray<Entry>;
-    using RowRefs = PaddedPODArray<RowRef>;
+    using Entries = PODArrayWithStackMemory<Entry, sizeof(Entry)>;
+    using RowRefs = PODArrayWithStackMemory<RowRef, sizeof(RowRef)>;
 
     static constexpr bool is_descending = (inequality == ASOFJoinInequality::Greater || inequality == ASOFJoinInequality::GreaterOrEquals);
     static constexpr bool is_strict = (inequality == ASOFJoinInequality::Less) || (inequality == ASOFJoinInequality::Greater);
@@ -145,7 +147,7 @@ public:
         return low;
     }
 
-    RowRef findAsof(const IColumn & asof_column, size_t row_num) override
+    RowRef * findAsof(const IColumn & asof_column, size_t row_num) override
     {
         sort();
 
@@ -157,10 +159,10 @@ public:
         if (pos != entries.size())
         {
             size_t row_ref_index = entries[pos].row_ref_index;
-            return row_refs[row_ref_index];
+            return &row_refs[row_ref_index];
         }
 
-        return {nullptr, 0};
+        return nullptr;
     }
 
 private:
@@ -176,45 +178,42 @@ private:
     // the array becomes immutable
     void sort()
     {
-        if (!sorted.load(std::memory_order_acquire))
+        if (sorted.load(std::memory_order_acquire))
+            return;
+
+        std::lock_guard<std::mutex> l(lock);
+
+        if (sorted.load(std::memory_order_relaxed))
+            return;
+
+        if constexpr (std::is_arithmetic_v<TKey> && !is_floating_point<TKey>)
         {
-            std::lock_guard<std::mutex> l(lock);
-
-            if (!sorted.load(std::memory_order_relaxed))
+            if (likely(entries.size() > 256))
             {
-                if constexpr (std::is_arithmetic_v<TKey> && !std::is_floating_point_v<TKey>)
+                struct RadixSortTraits : RadixSortNumTraits<TKey>
                 {
-                    if (likely(entries.size() > 256))
-                    {
-                        struct RadixSortTraits : RadixSortNumTraits<TKey>
-                        {
-                            using Element = Entry;
-                            using Result = Element;
+                    using Element = Entry;
+                    using Result = Element;
 
-                            static TKey & extractKey(Element & elem) { return elem.value; }
-                            static Result extractResult(Element & elem) { return elem; }
-                        };
+                    static TKey & extractKey(Element & elem) { return elem.value; }
+                    static Result extractResult(Element & elem) { return elem; }
+                };
 
-                        if constexpr (is_descending)
-                            RadixSort<RadixSortTraits>::executeLSD(entries.data(), entries.size(), true);
-                        else
-                            RadixSort<RadixSortTraits>::executeLSD(entries.data(), entries.size(), false);
-
-                        sorted.store(true, std::memory_order_release);
-                        return;
-                    }
-                }
-
-                if constexpr (is_descending)
-                    ::sort(entries.begin(), entries.end(), GreaterEntryOperator());
-                else
-                    ::sort(entries.begin(), entries.end(), LessEntryOperator());
-
+                RadixSort<RadixSortTraits>::executeLSDWithTrySort(entries.data(), entries.size(), is_descending /*reverse*/);
                 sorted.store(true, std::memory_order_release);
+                return;
             }
         }
+
+        if constexpr (is_descending)
+            ::sort(entries.begin(), entries.end(), GreaterEntryOperator());
+        else
+            ::sort(entries.begin(), entries.end(), LessEntryOperator());
+
+        sorted.store(true, std::memory_order_release);
     }
 };
+
 }
 
 AsofRowRefs createAsofRowRef(TypeIndex type, ASOFJoinInequality inequality)
@@ -238,7 +237,7 @@ AsofRowRefs createAsofRowRef(TypeIndex type, ASOFJoinInequality inequality)
                 result = std::make_unique<SortedLookupVector<T, ASOFJoinInequality::Greater>>();
                 break;
             default:
-                throw Exception("Invalid ASOF Join order", ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Invalid ASOF Join order");
         }
     };
 
@@ -265,7 +264,7 @@ std::optional<TypeIndex> SortedLookupVectorBase::getTypeSize(const IColumn & aso
     DISPATCH(DateTime64)
 #undef DISPATCH
 
-    throw Exception("ASOF join not supported for type: " + std::string(asof_column.getFamilyName()), ErrorCodes::BAD_TYPE_OF_FIELD);
+    throw Exception(ErrorCodes::BAD_TYPE_OF_FIELD, "ASOF join not supported for type: {}", std::string(asof_column.getFamilyName()));
 }
 
 }

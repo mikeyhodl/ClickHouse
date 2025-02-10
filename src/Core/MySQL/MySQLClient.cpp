@@ -7,6 +7,7 @@
 #include <Core/MySQL/PacketsReplication.h>
 #include <Core/MySQL/MySQLReplication.h>
 #include <Common/DNSResolver.h>
+#include <IO/WriteBuffer.h>
 #include <Poco/String.h>
 
 
@@ -55,7 +56,7 @@ void MySQLClient::connect()
     connected = true;
 
     in = std::make_shared<ReadBufferFromPocoSocket>(*socket);
-    out = std::make_shared<WriteBufferFromPocoSocket>(*socket);
+    out = std::make_shared<AutoCanceledWriteBuffer<WriteBufferFromPocoSocket>>(*socket);
     packet_endpoint = std::make_shared<MySQLProtocol::PacketEndpoint>(*in, *out, sequence_id);
 
     handshake();
@@ -79,9 +80,8 @@ void MySQLClient::handshake()
     packet_endpoint->receivePacket(handshake);
     if (handshake.auth_plugin_name != mysql_native_password)
     {
-        throw Exception(
-            "Only support " + mysql_native_password + " auth plugin name, but got " + handshake.auth_plugin_name,
-            ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
+        throw Exception(ErrorCodes::UNKNOWN_PACKET_FROM_SERVER, "Only support {} auth plugin name, but got {}",
+            mysql_native_password, handshake.auth_plugin_name);
     }
 
     Native41 native41(password, handshake.auth_plugin_data);
@@ -89,29 +89,29 @@ void MySQLClient::handshake()
 
     HandshakeResponse handshake_response(
         client_capabilities, MAX_PACKET_LENGTH, charset_utf8, user, "", auth_plugin_data, mysql_native_password);
-    packet_endpoint->sendPacket<HandshakeResponse>(handshake_response, true);
+    packet_endpoint->sendPacket<HandshakeResponse>(handshake_response);
 
     ResponsePacket packet_response(client_capabilities, true);
     packet_endpoint->receivePacket(packet_response);
     packet_endpoint->resetSequenceId();
 
     if (packet_response.getType() == PACKET_ERR)
-        throw Exception(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
-    else if (packet_response.getType() == PACKET_AUTH_SWITCH)
-        throw Exception("Access denied for user " + user, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
+        throw Exception::createDeprecated(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
+    if (packet_response.getType() == PACKET_AUTH_SWITCH)
+        throw Exception(ErrorCodes::UNKNOWN_PACKET_FROM_SERVER, "Access denied for user {}", user);
 }
 
 void MySQLClient::writeCommand(char command, String query)
 {
     WriteCommand write_command(command, query);
-    packet_endpoint->sendPacket<WriteCommand>(write_command, true);
+    packet_endpoint->sendPacket<WriteCommand>(write_command);
 
     ResponsePacket packet_response(client_capabilities);
     packet_endpoint->receivePacket(packet_response);
     switch (packet_response.getType())
     {
         case PACKET_ERR:
-            throw Exception(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
+            throw Exception::createDeprecated(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
         case PACKET_OK:
             break;
         default:
@@ -123,13 +123,13 @@ void MySQLClient::writeCommand(char command, String query)
 void MySQLClient::registerSlaveOnMaster(UInt32 slave_id)
 {
     RegisterSlave register_slave(slave_id);
-    packet_endpoint->sendPacket<RegisterSlave>(register_slave, true);
+    packet_endpoint->sendPacket<RegisterSlave>(register_slave);
 
     ResponsePacket packet_response(client_capabilities);
     packet_endpoint->receivePacket(packet_response);
     packet_endpoint->resetSequenceId();
     if (packet_response.getType() == PACKET_ERR)
-        throw Exception(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
+        throw Exception::createDeprecated(packet_response.err.error_message, ErrorCodes::UNKNOWN_PACKET_FROM_SERVER);
 }
 
 void MySQLClient::ping()
@@ -168,7 +168,7 @@ void MySQLClient::startBinlogDumpGTID(UInt32 slave_id, String replicate_db, std:
     replication.setReplicateTables(replicate_tables);
 
     BinlogDumpGTID binlog_dump(slave_id, gtid_sets.toPayload());
-    packet_endpoint->sendPacket<BinlogDumpGTID>(binlog_dump, true);
+    packet_endpoint->sendPacket<BinlogDumpGTID>(binlog_dump);
 }
 
 BinlogEventPtr MySQLClient::readOneBinlogEvent(UInt64 milliseconds)

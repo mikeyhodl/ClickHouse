@@ -16,17 +16,17 @@ namespace ErrorCodes
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
 }
 
-enum class ArgumentKind
+enum class ArgumentKind : uint8_t
 {
     Optional,
     Mandatory
 };
 
-String getExceptionMessage(
+PreformattedMessage getExceptionMessage(
     const String & message, size_t argument_index, const char * argument_name,
     const std::string & context_data_type_name, Field::Types::Which field_type)
 {
-    return fmt::format("Parameter #{} '{}' for {}{}, expected {} literal",
+    return PreformattedMessage::create("Parameter #{} '{}' for {}{}, expected {} literal",
         argument_index, argument_name, context_data_type_name, message, field_type);
 }
 
@@ -49,13 +49,13 @@ getArgument(const ASTPtr & arguments, size_t argument_index, const char * argume
             if (argument && argument->value.getType() != field_type)
                 throw Exception(getExceptionMessage(fmt::format(" has wrong type: {}", argument->value.getTypeName()),
                     argument_index, argument_name, context_data_type_name, field_type), ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
-            else
-                throw Exception(getExceptionMessage(" is missing", argument_index, argument_name, context_data_type_name, field_type),
-                    ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+            throw Exception(
+                getExceptionMessage(" is missing", argument_index, argument_name, context_data_type_name, field_type),
+                ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
         }
     }
 
-    return argument->value.get<NearestResultType>();
+    return argument->value.safeGet<NearestResultType>();
 }
 
 static DataTypePtr create(const ASTPtr & arguments)
@@ -64,7 +64,7 @@ static DataTypePtr create(const ASTPtr & arguments)
         return std::make_shared<DataTypeDateTime>();
 
     const auto scale = getArgument<UInt64, ArgumentKind::Optional>(arguments, 0, "scale", "DateTime");
-    const auto timezone = getArgument<String, ArgumentKind::Optional>(arguments, !!scale, "timezone", "DateTime");
+    const auto timezone = getArgument<String, ArgumentKind::Optional>(arguments, scale ? 1 : 0, "timezone", "DateTime");
 
     if (!scale && !timezone)
         throw Exception(getExceptionMessage(" has wrong type: ", 0, "scale", "DateTime", Field::Types::Which::UInt64),
@@ -83,7 +83,8 @@ static DataTypePtr create32(const ASTPtr & arguments)
         return std::make_shared<DataTypeDateTime>();
 
     if (arguments->children.size() != 1)
-        throw Exception("DateTime32 data type can optionally have only one argument - time zone name", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+        throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                        "DateTime32 data type can optionally have only one argument - time zone name");
 
     const auto timezone = getArgument<String, ArgumentKind::Mandatory>(arguments, 0, "timezone", "DateTime32");
 
@@ -96,7 +97,8 @@ static DataTypePtr create64(const ASTPtr & arguments)
         return std::make_shared<DataTypeDateTime64>(DataTypeDateTime64::default_scale);
 
     if (arguments->children.size() > 2)
-        throw Exception("DateTime64 data type can optionally have two argument - scale and time zone name", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+        throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                        "DateTime64 data type can optionally have two argument - scale and time zone name");
 
     const auto scale = getArgument<UInt64, ArgumentKind::Mandatory>(arguments, 0, "scale", "DateTime64");
     const auto timezone = getArgument<String, ArgumentKind::Optional>(arguments, 1, "timezone", "DateTime64");
@@ -106,11 +108,11 @@ static DataTypePtr create64(const ASTPtr & arguments)
 
 void registerDataTypeDateTime(DataTypeFactory & factory)
 {
-    factory.registerDataType("DateTime", create, DataTypeFactory::CaseInsensitive);
-    factory.registerDataType("DateTime32", create32, DataTypeFactory::CaseInsensitive);
-    factory.registerDataType("DateTime64", create64, DataTypeFactory::CaseInsensitive);
+    factory.registerDataType("DateTime", create, DataTypeFactory::Case::Insensitive);
+    factory.registerDataType("DateTime32", create32, DataTypeFactory::Case::Insensitive);
+    factory.registerDataType("DateTime64", create64, DataTypeFactory::Case::Insensitive);
 
-    factory.registerAlias("TIMESTAMP", "DateTime", DataTypeFactory::CaseInsensitive);
+    factory.registerAlias("TIMESTAMP", "DateTime", DataTypeFactory::Case::Insensitive);
 }
 
 }

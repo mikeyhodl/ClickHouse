@@ -18,9 +18,7 @@ using namespace GatherUtils;
 namespace ErrorCodes
 {
     extern const int ILLEGAL_COLUMN;
-    extern const int ILLEGAL_TYPE_OF_ARGUMENT;
     extern const int ZERO_ARRAY_OR_TUPLE_INDEX;
-    extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
 }
 
 class FunctionBitSlice : public IFunction
@@ -40,31 +38,22 @@ public:
 
     bool useDefaultImplementationForConstants() const override { return true; }
 
-    DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
+    DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
-        const size_t number_of_arguments = arguments.size();
+        FunctionArgumentDescriptors mandatory_args{
+            {"s", static_cast<FunctionArgumentDescriptor::TypeValidator>(&isStringOrFixedString), nullptr, "String"},
+            {"offset", static_cast<FunctionArgumentDescriptor::TypeValidator>(&isNativeNumber), nullptr, "(U)Int8/16/32/64 or Float"},
+        };
 
-        if (number_of_arguments < 2 || number_of_arguments > 3)
-            throw Exception(
-                "Number of arguments for function " + getName() + " doesn't match: passed " + toString(number_of_arguments)
-                    + ", should be 2 or 3",
-                ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+        FunctionArgumentDescriptors optional_args{
+            {"length", static_cast<FunctionArgumentDescriptor::TypeValidator>(&isNativeNumber), nullptr, "(U)Int8/16/32/64 or Float"},
+        };
 
-        if (!isString(arguments[0]) && !isStringOrFixedString(arguments[0]))
-            throw Exception(
-                "Illegal type " + arguments[0]->getName() + " of argument of function " + getName(), ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
-        if (arguments[0]->onlyNull())
-            return arguments[0];
+        validateFunctionArguments(*this, arguments, mandatory_args, optional_args);
 
-        if (!isNativeNumber(arguments[1]))
-            throw Exception(
-                "Illegal type " + arguments[1]->getName() + " of second argument of function " + getName(),
-                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
-
-        if (number_of_arguments == 3 && !isNativeNumber(arguments[2]))
-            throw Exception(
-                "Illegal type " + arguments[2]->getName() + " of second argument of function " + getName(),
-                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+        const auto & type = arguments[0].type;
+        if (type->onlyNull())
+            return type;
 
         return std::make_shared<DataTypeString>();
     }
@@ -95,19 +84,17 @@ public:
 
         if (const ColumnString * col = checkAndGetColumn<ColumnString>(column_string.get()))
             return executeForSource(column_start, column_length, start_const, length_const, StringSource(*col), input_rows_count);
-        else if (const ColumnFixedString * col_fixed = checkAndGetColumn<ColumnFixedString>(column_string.get()))
+        if (const ColumnFixedString * col_fixed = checkAndGetColumn<ColumnFixedString>(column_string.get()))
             return executeForSource(
                 column_start, column_length, start_const, length_const, FixedStringSource(*col_fixed), input_rows_count);
-        else if (const ColumnConst * col_const = checkAndGetColumnConst<ColumnString>(column_string.get()))
+        if (const ColumnConst * col_const = checkAndGetColumnConst<ColumnString>(column_string.get()))
             return executeForSource(
                 column_start, column_length, start_const, length_const, ConstSource<StringSource>(*col_const), input_rows_count);
-        else if (const ColumnConst * col_const_fixed = checkAndGetColumnConst<ColumnFixedString>(column_string.get()))
+        if (const ColumnConst * col_const_fixed = checkAndGetColumnConst<ColumnFixedString>(column_string.get()))
             return executeForSource(
                 column_start, column_length, start_const, length_const, ConstSource<FixedStringSource>(*col_const_fixed), input_rows_count);
-        else
-            throw Exception(
-                "Illegal column " + arguments[0].column->getName() + " of first argument of function " + getName(),
-                ErrorCodes::ILLEGAL_COLUMN);
+        throw Exception(
+            ErrorCodes::ILLEGAL_COLUMN, "Illegal column {} of first argument of function {}", arguments[0].column->getName(), getName());
     }
 
     template <class Source>
@@ -133,7 +120,7 @@ public:
                     bitSliceFromRightConstantOffsetUnbounded(
                         source, StringSink(*col_res, input_rows_count), -static_cast<size_t>(start_value));
                 else
-                    throw Exception("Indices in strings are 1-based", ErrorCodes::ZERO_ARRAY_OR_TUPLE_INDEX);
+                    throw Exception(ErrorCodes::ZERO_ARRAY_OR_TUPLE_INDEX, "Indices in strings are 1-based");
             }
             else
                 bitSliceDynamicOffsetUnbounded(source, StringSink(*col_res, input_rows_count), *column_start);
@@ -151,7 +138,7 @@ public:
                     bitSliceFromRightConstantOffsetBounded(
                         source, StringSink(*col_res, input_rows_count), -static_cast<size_t>(start_value), length_value);
                 else
-                    throw Exception("Indices in strings are 1-based", ErrorCodes::ZERO_ARRAY_OR_TUPLE_INDEX);
+                    throw Exception(ErrorCodes::ZERO_ARRAY_OR_TUPLE_INDEX, "Indices in strings are 1-based");
             }
             else
                 bitSliceDynamicOffsetBounded(source, StringSink(*col_res, input_rows_count), *column_start, *column_length);
@@ -295,7 +282,7 @@ public:
             ssize_t remain_byte = src.getElementSize() - offset_byte;
             if (length < 0)
             {
-                length_byte = std::max(remain_byte + (length / word_size), static_cast<ssize_t>(0));
+                length_byte = std::max(remain_byte + (length / word_size), 0z);
                 over_bit = word_size + (length % word_size);
                 if (length_byte == 1 && over_bit <= offset_bit) // begin and end are in same byte AND there are no gaps
                     length_byte = 0;
@@ -334,7 +321,7 @@ public:
             size_t size = src.getElementSize();
             if (length < 0)
             {
-                length_byte = std::max(static_cast<ssize_t>(offset_byte) + (length / word_size), static_cast<ssize_t>(0));
+                length_byte = std::max(static_cast<ssize_t>(offset_byte) + (length / word_size), 0z);
                 over_bit = word_size + (length % word_size);
                 if (length_byte == 1 && over_bit <= offset_bit) // begin and end are in same byte AND there are no gaps
                     length_byte = 0;
@@ -399,7 +386,7 @@ public:
                 }
                 else
                 {
-                    length_byte = std::max(remain_byte + (static_cast<ssize_t>(length) / word_size), static_cast<ssize_t>(0));
+                    length_byte = std::max(remain_byte + (static_cast<ssize_t>(length) / word_size), 0z);
                     over_bit = word_size + (length % word_size);
                     if (length_byte == 1 && over_bit <= offset_bit) // begin and end are in same byte AND there are no gaps
                         length_byte = 0;

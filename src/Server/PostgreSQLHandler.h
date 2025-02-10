@@ -4,11 +4,11 @@
 #include "config.h"
 #include <Core/PostgreSQLProtocol.h>
 #include <Poco/Net/TCPServerConnection.h>
-#include <Common/logger_useful.h>
 #include "IServer.h"
 
 #if USE_SSL
-#   include <Poco/Net/SecureStreamSocket.h>
+#    include <Poco/Net/SSLManager.h>
+#    include <Poco/Net/SecureStreamSocket.h>
 #endif
 
 namespace CurrentMetrics
@@ -30,16 +30,33 @@ class PostgreSQLHandler : public Poco::Net::TCPServerConnection
 public:
     PostgreSQLHandler(
         const Poco::Net::StreamSocket & socket_,
+#if USE_SSL
+        const std::string & prefix_,
+#endif
         IServer & server_,
         TCPServer & tcp_server_,
         bool ssl_enabled_,
         Int32 connection_id_,
-        std::vector<std::shared_ptr<PostgreSQLProtocol::PGAuthentication::AuthenticationMethod>> & auth_methods_);
+        std::vector<std::shared_ptr<PostgreSQLProtocol::PGAuthentication::AuthenticationMethod>> & auth_methods_,
+        const ProfileEvents::Event & read_event_ = ProfileEvents::end(),
+        const ProfileEvents::Event & write_event_ = ProfileEvents::end());
 
     void run() final;
 
 private:
-    Poco::Logger * log = &Poco::Logger::get("PostgreSQLHandler");
+    LoggerPtr log = getLogger("PostgreSQLHandler");
+
+#if USE_SSL
+    std::shared_ptr<Poco::Net::SecureStreamSocket> ss;
+
+    Poco::Net::Context::Params params [[maybe_unused]];
+    Poco::Net::Context::Usage usage [[maybe_unused]];
+    int disabled_protocols = 0;
+    bool extended_verification = false;
+    bool prefer_server_ciphers = false;
+    const Poco::Util::LayeredConfiguration & config [[maybe_unused]];
+    std::string prefix [[maybe_unused]];
+#endif
 
     IServer & server;
     TCPServer & tcp_server;
@@ -52,9 +69,8 @@ private:
     std::shared_ptr<WriteBuffer> out;
     std::shared_ptr<PostgreSQLProtocol::Messaging::MessageTransport> message_transport;
 
-#if USE_SSL
-    std::shared_ptr<Poco::Net::SecureStreamSocket> ss;
-#endif
+    ProfileEvents::Event read_event;
+    ProfileEvents::Event write_event;
 
     PostgreSQLProtocol::PGAuthentication::AuthenticationManager authentication_manager;
 

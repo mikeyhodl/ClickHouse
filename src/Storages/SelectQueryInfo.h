@@ -1,15 +1,12 @@
 #pragma once
 
-#include <Interpreters/PreparedSets.h>
-#include <Interpreters/DatabaseAndTableWithAlias.h>
-#include <Core/SortDescription.h>
-#include <Core/Names.h>
-#include <Storages/ProjectionsDescription.h>
-#include <Interpreters/AggregateDescription.h>
-#include <QueryPipeline/StreamLocalLimits.h>
 #include <Analyzer/IQueryTreeNode.h>
 #include <Analyzer/TableExpressionModifiers.h>
-#include <Planner/PlannerContext.h>
+#include <Core/SortDescription.h>
+#include <Interpreters/ActionsDAG.h>
+#include <Interpreters/DatabaseAndTableWithAlias.h>
+#include <Interpreters/PreparedSets.h>
+#include <QueryPipeline/StreamLocalLimits.h>
 
 #include <memory>
 
@@ -19,14 +16,8 @@ namespace DB
 class ExpressionActions;
 using ExpressionActionsPtr = std::shared_ptr<ExpressionActions>;
 
-class ActionsDAG;
-using ActionsDAGPtr = std::shared_ptr<ActionsDAG>;
-
 struct PrewhereInfo;
 using PrewhereInfoPtr = std::shared_ptr<PrewhereInfo>;
-
-struct FilterInfo;
-using FilterInfoPtr = std::shared_ptr<FilterInfo>;
 
 struct FilterDAGInfo;
 using FilterDAGInfoPtr = std::shared_ptr<FilterDAGInfo>;
@@ -43,23 +34,24 @@ using ReadInOrderOptimizerPtr = std::shared_ptr<const ReadInOrderOptimizer>;
 class Cluster;
 using ClusterPtr = std::shared_ptr<Cluster>;
 
-struct MergeTreeDataSelectAnalysisResult;
-using MergeTreeDataSelectAnalysisResultPtr = std::shared_ptr<MergeTreeDataSelectAnalysisResult>;
+class PlannerContext;
+using PlannerContextPtr = std::shared_ptr<PlannerContext>;
 
 struct PrewhereInfo
 {
     /// Actions for row level security filter. Applied separately before prewhere_actions.
     /// This actions are separate because prewhere condition should not be executed over filtered rows.
-    ActionsDAGPtr row_level_filter;
+    std::optional<ActionsDAG> row_level_filter;
     /// Actions which are executed on block in order to get filter column for prewhere step.
-    ActionsDAGPtr prewhere_actions;
+    ActionsDAG prewhere_actions;
     String row_level_column_name;
     String prewhere_column_name;
     bool remove_prewhere_column = false;
     bool need_filter = false;
+    bool generated_by_optimizer = false;
 
     PrewhereInfo() = default;
-    explicit PrewhereInfo(ActionsDAGPtr prewhere_actions_, String prewhere_column_name_)
+    explicit PrewhereInfo(ActionsDAG prewhere_actions_, String prewhere_column_name_)
             : prewhere_actions(std::move(prewhere_actions_)), prewhere_column_name(std::move(prewhere_column_name_)) {}
 
     std::string dump() const;
@@ -71,31 +63,22 @@ struct PrewhereInfo
         if (row_level_filter)
             prewhere_info->row_level_filter = row_level_filter->clone();
 
-        if (prewhere_actions)
-            prewhere_info->prewhere_actions = prewhere_actions->clone();
+        prewhere_info->prewhere_actions = prewhere_actions.clone();
 
         prewhere_info->row_level_column_name = row_level_column_name;
         prewhere_info->prewhere_column_name = prewhere_column_name;
         prewhere_info->remove_prewhere_column = remove_prewhere_column;
         prewhere_info->need_filter = need_filter;
+        prewhere_info->generated_by_optimizer = generated_by_optimizer;
 
         return prewhere_info;
     }
 };
 
-/// Helper struct to store all the information about the filter expression.
-struct FilterInfo
-{
-    ExpressionActionsPtr alias_actions;
-    ExpressionActionsPtr actions;
-    String column_name;
-    bool do_remove_column = false;
-};
-
 /// Same as FilterInfo, but with ActionsDAG.
 struct FilterDAGInfo
 {
-    ActionsDAGPtr actions;
+    ActionsDAG actions;
     String column_name;
     bool do_remove_column = false;
 
@@ -142,28 +125,8 @@ class IMergeTreeDataPart;
 
 using ManyExpressionActions = std::vector<ExpressionActionsPtr>;
 
-// The projection selected to execute current query
-struct ProjectionCandidate
-{
-    ProjectionDescriptionRawPtr desc{};
-    PrewhereInfoPtr prewhere_info;
-    ActionsDAGPtr before_where;
-    String where_column_name;
-    bool remove_where_filter = false;
-    ActionsDAGPtr before_aggregation;
-    Names required_columns;
-    NamesAndTypesList aggregation_keys;
-    AggregateDescriptions aggregate_descriptions;
-    bool aggregate_overflow_row = false;
-    bool aggregate_final = false;
-    bool complete = false;
-    ReadInOrderOptimizerPtr order_optimizer;
-    InputOrderInfoPtr input_order_info;
-    ManyExpressionActions group_by_elements_actions;
-    SortDescription group_by_elements_order_descr;
-    MergeTreeDataSelectAnalysisResultPtr merge_tree_projection_select_result_ptr;
-    MergeTreeDataSelectAnalysisResultPtr merge_tree_normal_select_result_ptr;
-};
+struct StorageSnapshot;
+using StorageSnapshotPtr = std::shared_ptr<StorageSnapshot>;
 
 /** Query along with some additional data,
   *  that can be used during query processing
@@ -171,25 +134,37 @@ struct ProjectionCandidate
   */
 struct SelectQueryInfo
 {
-
     SelectQueryInfo()
         : prepared_sets(std::make_shared<PreparedSets>())
     {}
 
     ASTPtr query;
     ASTPtr view_query; /// Optimized VIEW query
-    ASTPtr original_query; /// Unmodified query for projection analysis
+
+    /// Query tree
+    QueryTreeNodePtr query_tree;
 
     /// Planner context
     PlannerContextPtr planner_context;
 
     /// Storage table expression
+    /// It's guaranteed to be present in JOIN TREE of `query_tree`
     QueryTreeNodePtr table_expression;
 
     /// Table expression modifiers for storage
     std::optional<TableExpressionModifiers> table_expression_modifiers;
 
     std::shared_ptr<const StorageLimitsList> storage_limits;
+
+    /// Local storage limits
+    StorageLimits local_storage_limits;
+
+    /// This is a leak of abstraction.
+    /// StorageMerge replaces storage into query_tree. However, column types may be changed for inner table.
+    /// So, resolved query tree might have incompatible types.
+    /// StorageDistributed uses this query tree to calculate a header, throws if we use storage snapshot.
+    /// To avoid this, we use initial merge_storage_snapshot.
+    StorageSnapshotPtr merge_storage_snapshot;
 
     /// Cluster for the query.
     ClusterPtr cluster;
@@ -207,6 +182,9 @@ struct SelectQueryInfo
     /// It is needed for PK analysis based on row_level_policy and additional_filters.
     ASTs filter_asts;
 
+    /// Filter actions dag for current storage
+    std::shared_ptr<const ActionsDAG> filter_actions_dag;
+
     ReadInOrderOptimizerPtr order_optimizer;
     /// Can be modified while reading from storage
     InputOrderInfoPtr input_order_info;
@@ -221,23 +199,32 @@ struct SelectQueryInfo
     bool need_aggregate = false;
     PrewhereInfoPtr prewhere_info;
 
+    /// If query has aggregate functions
+    bool has_aggregates = false;
+
     ClusterPtr getCluster() const { return !optimized_cluster ? cluster : optimized_cluster; }
 
-    /// If not null, it means we choose a projection to execute current query.
-    std::optional<ProjectionCandidate> projection;
-    bool ignore_projections = false;
-    bool is_projection_query = false;
-    bool merge_tree_empty_result = false;
     bool settings_limit_offset_done = false;
-    Block minmax_count_projection_block;
-    MergeTreeDataSelectAnalysisResultPtr merge_tree_select_result_ptr;
+    bool is_internal = false;
+    bool parallel_replicas_disabled = false;
+    bool is_parameterized_view = false;
+    bool optimize_trivial_count = false;
 
-    // If limit is not 0, that means it's a trivial limit query.
-    UInt64 limit = 0;
+    // If not 0, that means it's a trivial limit query.
+    UInt64 trivial_limit = 0;
 
-    InputOrderInfoPtr getInputOrderInfo() const
-    {
-        return input_order_info ? input_order_info : (projection ? projection->input_order_info : nullptr);
-    }
+    /// For IStorageSystemOneBlock
+    std::vector<UInt8> columns_mask;
+
+    /// During read from MergeTree parts will be removed from snapshot after they are not needed
+    bool merge_tree_enable_remove_parts_from_snapshot_optimization = true;
+
+    bool isFinal() const;
+
+    /// Analyzer generates unique ColumnIdentifiers like __table1.__partition_id in filter nodes,
+    /// while key analysis still requires unqualified column names.
+    /// This function generates a map that maps the unique names to table column names,
+    /// for the current table (`table_expression`).
+    std::unordered_map<std::string, ColumnWithTypeAndName> buildNodeNameToInputNodeColumn() const;
 };
 }

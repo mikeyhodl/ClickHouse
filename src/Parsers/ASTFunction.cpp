@@ -2,11 +2,11 @@
 
 #include <Parsers/ASTFunction.h>
 
+#include <Common/assert_cast.h>
 #include <Common/quoteString.h>
 #include <Common/FieldVisitorToString.h>
 #include <Common/KnownObjectNames.h>
 #include <Common/SipHash.h>
-#include <Common/typeid_cast.h>
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
@@ -17,7 +17,7 @@
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/queryToString.h>
 #include <Parsers/ASTSetQuery.h>
-#include <Core/QualifiedTableName.h>
+#include <Parsers/FunctionSecretArgumentsFinderAST.h>
 
 
 using namespace std::literals;
@@ -28,349 +28,19 @@ namespace DB
 
 namespace ErrorCodes
 {
-    extern const int UNEXPECTED_EXPRESSION;
     extern const int UNEXPECTED_AST_STRUCTURE;
-}
-
-
-namespace
-{
-    /// Finds arguments of a specified function which should not be displayed for most users for security reasons.
-    /// That involves passwords and secret keys.
-    /// The member function getRange() returns a pair of numbers [first, last) specifying arguments
-    /// which must be hidden. If the function returns {-1, -1} that means no arguments must be hidden.
-    class FunctionSecretArgumentsFinder
-    {
-    public:
-        explicit FunctionSecretArgumentsFinder(const ASTFunction & function_) : function(function_)
-        {
-            if (function.arguments)
-            {
-                if (const auto * expr_list = function.arguments->as<ASTExpressionList>())
-                    arguments = &expr_list->children;
-            }
-        }
-
-        std::pair<size_t, size_t> getRange() const
-        {
-            if (!arguments)
-                return npos;
-
-            switch (function.kind)
-            {
-                case ASTFunction::Kind::ORDINARY_FUNCTION: return findOrdinaryFunctionSecretArguments();
-                case ASTFunction::Kind::WINDOW_FUNCTION: return npos;
-                case ASTFunction::Kind::LAMBDA_FUNCTION: return npos;
-                case ASTFunction::Kind::TABLE_ENGINE: return findTableEngineSecretArguments();
-                case ASTFunction::Kind::DATABASE_ENGINE: return findDatabaseEngineSecretArguments();
-                case ASTFunction::Kind::BACKUP_NAME: return findBackupNameSecretArguments();
-            }
-        }
-
-        static const constexpr std::pair<size_t, size_t> npos{static_cast<size_t>(-1), static_cast<size_t>(-1)};
-
-    private:
-        std::pair<size_t, size_t> findOrdinaryFunctionSecretArguments() const
-        {
-            if ((function.name == "mysql") || (function.name == "postgresql") || (function.name == "mongodb"))
-            {
-                /// mysql('host:port', 'database', 'table', 'user', 'password', ...)
-                /// postgresql('host:port', 'database', 'table', 'user', 'password', ...)
-                /// mongodb('host:port', 'database', 'collection', 'user', 'password', ...)
-                return {4, 5};
-            }
-            else if ((function.name == "s3") || (function.name == "cosn") || (function.name == "oss"))
-            {
-                /// s3('url', 'aws_access_key_id', 'aws_secret_access_key', ...)
-                return findS3FunctionSecretArguments(/* is_cluster_function= */ false);
-            }
-            else if (function.name == "s3Cluster")
-            {
-                /// s3Cluster('cluster_name', 'url', 'aws_access_key_id', 'aws_secret_access_key', ...)
-                return findS3FunctionSecretArguments(/* is_cluster_function= */ true);
-            }
-            else if ((function.name == "remote") || (function.name == "remoteSecure"))
-            {
-                /// remote('addresses_expr', 'db', 'table', 'user', 'password', ...)
-                return findRemoteFunctionSecretArguments();
-            }
-            else if ((function.name == "encrypt") || (function.name == "decrypt") ||
-                     (function.name == "aes_encrypt_mysql") || (function.name == "aes_decrypt_mysql") ||
-                     (function.name == "tryDecrypt"))
-            {
-                /// encrypt('mode', 'plaintext', 'key' [, iv, aad])
-                return findEncryptionFunctionSecretArguments();
-            }
-            else
-            {
-                return npos;
-            }
-        }
-
-        std::pair<size_t, size_t> findS3FunctionSecretArguments(bool is_cluster_function) const
-        {
-            /// s3Cluster('cluster_name', 'url', ...) has 'url' as its second argument.
-            size_t url_arg_idx = is_cluster_function ? 1 : 0;
-
-            /// We're going to replace 'aws_secret_access_key' with '[HIDDEN'] for the following signatures:
-            /// s3('url', 'aws_access_key_id', 'aws_secret_access_key', ...)
-            /// s3Cluster('cluster_name', 'url', 'aws_access_key_id', 'aws_secret_access_key', 'format', 'compression')
-
-            /// But we should check the number of arguments first because we don't need to do any replacements in case of
-            /// s3('url' [, 'format']) or s3Cluster('cluster_name', 'url' [, 'format'])
-            if (arguments->size() < url_arg_idx + 3)
-                return npos;
-
-            if (arguments->size() >= url_arg_idx + 5)
-            {
-                /// s3('url', 'aws_access_key_id', 'aws_secret_access_key', 'format', 'structure', ...)
-                return {url_arg_idx + 2, url_arg_idx + 3};
-            }
-            else
-            {
-                /// s3('url', 'aws_access_key_id', 'aws_secret_access_key', ...)
-                /// We need to distinguish that from s3('url', 'format', 'structure' [, 'compression_method']).
-                /// So we will check whether the argument after 'url' is a format.
-                String format;
-                if (!tryGetStringFromArgument(url_arg_idx + 1, &format, /* allow_identifier= */ false))
-                {
-                    /// We couldn't evaluate the argument after 'url' so we don't know whether it is a format or `aws_access_key_id`.
-                    /// So it's safer to wipe the next argument just in case.
-                    return {url_arg_idx + 2, url_arg_idx + 3}; /// Wipe either `aws_secret_access_key` or `structure`.
-                }
-
-                if (KnownFormatNames::instance().exists(format))
-                    return npos; /// The argument after 'url' is a format: s3('url', 'format', ...)
-
-                /// The argument after 'url' is not a format so we do our replacement:
-                /// s3('url', 'aws_access_key_id', 'aws_secret_access_key', ...) -> s3('url', 'aws_access_key_id', '[HIDDEN]', ...)
-                return {url_arg_idx + 2, url_arg_idx + 3};
-            }
-        }
-
-        bool tryGetStringFromArgument(size_t arg_idx, String * res, bool allow_identifier = true) const
-        {
-            if (arg_idx >= arguments->size())
-                return false;
-
-            ASTPtr argument = (*arguments)[arg_idx];
-            if (const auto * literal = argument->as<ASTLiteral>())
-            {
-                if (literal->value.getType() != Field::Types::String)
-                    return false;
-                if (res)
-                    *res = literal->value.safeGet<String>();
-                return true;
-            }
-
-            if (allow_identifier)
-            {
-                if (const auto * id = argument->as<ASTIdentifier>())
-                {
-                    if (res)
-                        *res = id->name();
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        std::pair<size_t, size_t> findRemoteFunctionSecretArguments() const
-        {
-            /// We're going to replace 'password' with '[HIDDEN'] for the following signatures:
-            /// remote('addresses_expr', db.table, 'user' [, 'password'] [, sharding_key])
-            /// remote('addresses_expr', 'db', 'table', 'user' [, 'password'] [, sharding_key])
-            /// remote('addresses_expr', table_function(), 'user' [, 'password'] [, sharding_key])
-
-            /// But we should check the number of arguments first because we don't need to do any replacements in case of
-            /// remote('addresses_expr', db.table)
-            if (arguments->size() < 3)
-                return npos;
-
-            size_t arg_num = 1;
-
-            /// Skip 1 or 2 arguments with table_function() or db.table or 'db', 'table'.
-            const auto * table_function = (*arguments)[arg_num]->as<ASTFunction>();
-            if (table_function && KnownTableFunctionNames::instance().exists(table_function->name))
-            {
-                ++arg_num;
-            }
-            else
-            {
-                std::optional<String> database;
-                std::optional<QualifiedTableName> qualified_table_name;
-                if (!tryGetDatabaseNameOrQualifiedTableName(arg_num, database, qualified_table_name))
-                {
-                    /// We couldn't evaluate the argument so we don't know whether it is 'db.table' or just 'db'.
-                    /// Hence we can't figure out whether we should skip one argument 'user' or two arguments 'table', 'user'
-                    /// before the argument 'password'. So it's safer to wipe two arguments just in case.
-                    /// The last argument can be also a `sharding_key`, so we need to check that argument is a literal string
-                    /// before wiping it (because the `password` argument is always a literal string).
-                    auto res = npos;
-                    if (tryGetStringFromArgument(arg_num + 2, nullptr, /* allow_identifier= */ false))
-                    {
-                        /// Wipe either `password` or `user`.
-                        res = {arg_num + 2, arg_num + 3};
-                    }
-                    if (tryGetStringFromArgument(arg_num + 3, nullptr, /* allow_identifier= */ false))
-                    {
-                        /// Wipe either `password` or `sharding_key`.
-                        if (res == npos)
-                            res.first = arg_num + 3;
-                        res.second = arg_num + 4;
-                    }
-                    return res;
-                }
-
-                /// Skip the current argument (which is either a database name or a qualified table name).
-                ++arg_num;
-                if (database)
-                {
-                    /// Skip the 'table' argument if the previous argument was a database name.
-                    ++arg_num;
-                }
-            }
-
-            /// Skip username.
-            ++arg_num;
-
-            /// Do our replacement:
-            /// remote('addresses_expr', db.table, 'user', 'password', ...) -> remote('addresses_expr', db.table, 'user', '[HIDDEN]', ...)
-            /// The last argument can be also a `sharding_key`, so we need to check that argument is a literal string
-            /// before wiping it (because the `password` argument is always a literal string).
-            bool can_be_password = tryGetStringFromArgument(arg_num, nullptr, /* allow_identifier= */ false);
-            if (can_be_password)
-                return {arg_num, arg_num + 1};
-
-            return npos;
-        }
-
-        /// Tries to get either a database name or a qualified table name from an argument.
-        /// Empty string is also allowed (it means the default database).
-        /// The function is used by findRemoteFunctionSecretArguments() to determine how many arguments to skip before a password.
-        bool tryGetDatabaseNameOrQualifiedTableName(
-            size_t arg_idx,
-            std::optional<String> & res_database,
-            std::optional<QualifiedTableName> & res_qualified_table_name) const
-        {
-            res_database.reset();
-            res_qualified_table_name.reset();
-
-            String str;
-            if (!tryGetStringFromArgument(arg_idx, &str, /* allow_identifier= */ true))
-                return false;
-
-            if (str.empty())
-            {
-                res_database = "";
-                return true;
-            }
-
-            auto qualified_table_name = QualifiedTableName::tryParseFromString(str);
-            if (!qualified_table_name)
-                return false;
-
-            if (qualified_table_name->database.empty())
-                res_database = std::move(qualified_table_name->table);
-            else
-                res_qualified_table_name = std::move(qualified_table_name);
-            return true;
-        }
-
-        std::pair<size_t, size_t> findEncryptionFunctionSecretArguments() const
-        {
-            /// We replace all arguments after 'mode' with '[HIDDEN]':
-            /// encrypt('mode', 'plaintext', 'key' [, iv, aad]) -> encrypt('mode', '[HIDDEN]')
-            return {1, arguments->size()};
-        }
-
-        std::pair<size_t, size_t> findTableEngineSecretArguments() const
-        {
-            const String & engine_name = function.name;
-            if (engine_name == "ExternalDistributed")
-            {
-                /// ExternalDistributed('engine', 'host:port', 'database', 'table', 'user', 'password')
-                return {5, 6};
-            }
-            else if ((engine_name == "MySQL") || (engine_name == "PostgreSQL") ||
-                     (engine_name == "MaterializedPostgreSQL") || (engine_name == "MongoDB"))
-            {
-                /// MySQL('host:port', 'database', 'table', 'user', 'password', ...)
-                /// PostgreSQL('host:port', 'database', 'table', 'user', 'password', ...)
-                /// MaterializedPostgreSQL('host:port', 'database', 'table', 'user', 'password', ...)
-                /// MongoDB('host:port', 'database', 'collection', 'user', 'password', ...)
-                return {4, 5};
-            }
-            else if ((engine_name == "S3") || (engine_name == "COSN") || (engine_name == "OSS"))
-            {
-                /// S3('url', ['aws_access_key_id', 'aws_secret_access_key',] ...)
-                return findS3TableEngineSecretArguments();
-            }
-            else
-            {
-                return npos;
-            }
-        }
-
-        std::pair<size_t, size_t> findS3TableEngineSecretArguments() const
-        {
-            /// We replace 'aws_secret_access_key' with '[HIDDEN'] for the following signatures:
-            /// S3('url', 'aws_access_key_id', 'aws_secret_access_key', 'format')
-            /// S3('url', 'aws_access_key_id', 'aws_secret_access_key', 'format', 'compression')
-
-            /// But we should check the number of arguments first because we don't need to do that replacements in case of
-            /// S3('url' [, 'format' [, 'compression']])
-            if (arguments->size() < 4)
-                return npos;
-
-            return {2, 3};
-        }
-
-        std::pair<size_t, size_t> findDatabaseEngineSecretArguments() const
-        {
-            const String & engine_name = function.name;
-            if ((engine_name == "MySQL") || (engine_name == "MaterializeMySQL") ||
-                (engine_name == "MaterializedMySQL") || (engine_name == "PostgreSQL") ||
-                (engine_name == "MaterializedPostgreSQL"))
-            {
-                /// MySQL('host:port', 'database', 'user', 'password')
-                /// PostgreSQL('host:port', 'database', 'user', 'password', ...)
-                return {3, 4};
-            }
-            else
-            {
-                return npos;
-            }
-        }
-
-        std::pair<size_t, size_t> findBackupNameSecretArguments() const
-        {
-            const String & engine_name = function.name;
-            if (engine_name == "S3")
-            {
-                /// BACKUP ... TO S3(url, [aws_access_key_id, aws_secret_access_key])
-                return {2, 3};
-            }
-            else
-            {
-                return npos;
-            }
-        }
-
-        const ASTFunction & function;
-        const ASTs * arguments = nullptr;
-    };
+    extern const int UNKNOWN_FUNCTION;
 }
 
 
 void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
 {
-    if (name == "view")
-        throw Exception("Table function view cannot be used as an expression", ErrorCodes::UNEXPECTED_EXPRESSION);
+    /// These functions contain some unexpected ASTs in arguments (e.g. SETTINGS or even a SELECT query)
+    if (name == "view" || name == "viewIfPermitted" || name == "mysql" || name == "postgresql" || name == "mongodb" || name == "s3")
+        throw Exception(ErrorCodes::UNKNOWN_FUNCTION, "Table function '{}' cannot be used as an expression", name);
 
     /// If function can be converted to literal it will be parsed as literal after formatting.
-    /// In distributed query it may lead to mismathed column names.
+    /// In distributed query it may lead to mismatched column names.
     /// To avoid it we check whether we can convert function to literal.
     if (auto literal = toLiteral())
     {
@@ -383,7 +53,7 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
     if (parameters)
     {
         writeChar('(', ostr);
-        for (auto it = parameters->children.begin(); it != parameters->children.end(); ++it)
+        for (auto * it = parameters->children.begin(); it != parameters->children.end(); ++it)
         {
             if (it != parameters->children.begin())
                 writeCString(", ", ostr);
@@ -396,7 +66,7 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
     writeChar('(', ostr);
     if (arguments)
     {
-        for (auto it = arguments->children.begin(); it != arguments->children.end(); ++it)
+        for (auto * it = arguments->children.begin(); it != arguments->children.end(); ++it)
         {
             if (it != arguments->children.begin())
                 writeCString(", ", ostr);
@@ -407,6 +77,11 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
 
     writeChar(')', ostr);
 
+    if (nulls_action == NullsAction::RESPECT_NULLS)
+        writeCString(" RESPECT NULLS", ostr);
+    else if (nulls_action == NullsAction::IGNORE_NULLS)
+        writeCString(" IGNORE NULLS", ostr);
+
     if (is_window_function)
     {
         writeCString(" OVER ", ostr);
@@ -416,31 +91,36 @@ void ASTFunction::appendColumnNameImpl(WriteBuffer & ostr) const
         }
         else
         {
-            FormatSettings format_settings{ostr, true /* one_line */};
+            FormatSettings format_settings{true /* one_line */};
             FormatState state;
             FormatStateStacked frame;
             writeCString("(", ostr);
-            window_definition->formatImpl(format_settings, state, frame);
+            window_definition->format(ostr, format_settings, state, frame);
             writeCString(")", ostr);
         }
     }
 }
 
-void ASTFunction::finishFormatWithWindow(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
+void ASTFunction::finishFormatWithWindow(WriteBuffer & ostr, const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
 {
+    if (nulls_action == NullsAction::RESPECT_NULLS)
+        ostr << " RESPECT NULLS";
+    else if (nulls_action == NullsAction::IGNORE_NULLS)
+        ostr << " IGNORE NULLS";
+
     if (!is_window_function)
         return;
 
-    settings.ostr << " OVER ";
+    ostr << " OVER ";
     if (!window_name.empty())
     {
-        settings.ostr << backQuoteIfNeed(window_name);
+        ostr << backQuoteIfNeed(window_name);
     }
     else
     {
-        settings.ostr << "(";
-        window_definition->formatImpl(settings, state, frame);
-        settings.ostr << ")";
+        ostr << "(";
+        window_definition->format(ostr, settings, state, frame);
+        ostr << ")";
     }
 }
 
@@ -468,11 +148,20 @@ ASTPtr ASTFunction::clone() const
 }
 
 
-void ASTFunction::updateTreeHashImpl(SipHash & hash_state) const
+void ASTFunction::updateTreeHashImpl(SipHash & hash_state, bool ignore_aliases) const
 {
     hash_state.update(name.size());
     hash_state.update(name);
-    IAST::updateTreeHashImpl(hash_state);
+    ASTWithAlias::updateTreeHashImpl(hash_state, ignore_aliases);
+
+    hash_state.update(nulls_action);
+    if (is_window_function)
+    {
+        hash_state.update(window_name.size());
+        hash_state.update(window_name);
+        if (window_definition)
+            window_definition->updateTreeHashImpl(hash_state, ignore_aliases);
+    }
 }
 
 template <typename Container>
@@ -523,7 +212,7 @@ ASTPtr ASTFunction::toLiteral() const
   *
   * Another case is regexp match. Suppose the user types match(URL, 'www.clickhouse.com'). It often means that the user is unaware that . is a metacharacter.
   */
-static bool highlightStringLiteralWithMetacharacters(const ASTPtr & node, const IAST::FormatSettings & settings, const char * metacharacters)
+static bool highlightStringLiteralWithMetacharacters(const ASTPtr & node, WriteBuffer & ostr, const char * metacharacters)
 {
     if (const auto * literal = node->as<ASTLiteral>())
     {
@@ -536,7 +225,7 @@ static bool highlightStringLiteralWithMetacharacters(const ASTPtr & node, const 
             {
                 if (c == '\\')
                 {
-                    settings.ostr << c;
+                    ostr << c;
                     if (escaping == 2)
                         escaping = 0;
                     ++escaping;
@@ -544,14 +233,14 @@ static bool highlightStringLiteralWithMetacharacters(const ASTPtr & node, const 
                 else if (nullptr != strchr(metacharacters, c))
                 {
                     if (escaping == 2)      /// Properly escaped metacharacter
-                        settings.ostr << c;
+                        ostr << c;
                     else                    /// Unescaped metacharacter
-                        settings.ostr << "\033[1;35m" << c << "\033[0m";
+                        ostr << "\033[1;35m" << c << "\033[0m";
                     escaping = 0;
                 }
                 else
                 {
-                    settings.ostr << c;
+                    ostr << c;
                     escaping = 0;
                 }
             }
@@ -574,9 +263,30 @@ ASTSelectWithUnionQuery * ASTFunction::tryGetQueryArgument() const
 }
 
 
-void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
+static bool formatNamedArgWithHiddenValue(IAST * arg, WriteBuffer & ostr, const IAST::FormatSettings & settings, IAST::FormatState & state, IAST::FormatStateStacked frame)
+{
+    const auto * equals_func = arg->as<ASTFunction>();
+    if (!equals_func || (equals_func->name != "equals"))
+        return false;
+    const auto * expr_list = equals_func->arguments->as<ASTExpressionList>();
+    if (!expr_list)
+        return false;
+    const auto & equal_args = expr_list->children;
+    if (equal_args.size() != 2)
+        return false;
+
+    equal_args[0]->format(ostr, settings, state, frame);
+    ostr << (settings.hilite ? IAST::hilite_operator : "") << " = " << (settings.hilite ? IAST::hilite_none : "");
+    ostr << "'[HIDDEN]'";
+
+    return true;
+}
+
+void ASTFunction::formatImplWithoutAlias(WriteBuffer & ostr, const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
 {
     frame.expression_list_prepend_whitespace = false;
+    if (kind == Kind::CODEC || kind == Kind::STATISTICS || kind == Kind::BACKUP_NAME)
+        frame.allow_operators = false;
     FormatStateStacked nested_need_parens = frame;
     FormatStateStacked nested_dont_need_parens = frame;
     nested_need_parens.need_parens = true;
@@ -586,19 +296,21 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
     {
         std::string nl_or_nothing = settings.one_line ? "" : "\n";
         std::string indent_str = settings.one_line ? "" : std::string(4u * frame.indent, ' ');
-        settings.ostr << (settings.hilite ? hilite_function : "") << name << "(" << nl_or_nothing;
+        ostr << (settings.hilite ? hilite_function : "") << name << (settings.hilite ? hilite_none : "");
+        ostr << (settings.hilite ? hilite_function : "") << "(" << (settings.hilite ? hilite_none : "");
+        ostr << nl_or_nothing;
         FormatStateStacked frame_nested = frame;
         frame_nested.need_parens = false;
         ++frame_nested.indent;
-        query->formatImpl(settings, state, frame_nested);
-        settings.ostr << nl_or_nothing << indent_str << ")";
+        query->format(ostr, settings, state, frame_nested);
+        ostr << nl_or_nothing << indent_str;
+        ostr << (settings.hilite ? hilite_function : "") << ")" << (settings.hilite ? hilite_none : "");
         return;
     }
 
     /// Should this function to be written as operator?
     bool written = false;
-
-    if (arguments && !parameters)
+    if (arguments && !parameters && frame.allow_operators && nulls_action == NullsAction::EMPTY)
     {
         /// Unary prefix operators.
         if (arguments->children.size() == 1)
@@ -619,35 +331,47 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
 
                 const auto * literal = arguments->children[0]->as<ASTLiteral>();
                 const auto * function = arguments->children[0]->as<ASTFunction>();
-                bool negate = name == "negate";
-                bool is_tuple = literal && literal->value.getType() == Field::Types::Tuple;
-                // do not add parentheses for tuple literal, otherwise extra parens will be added `-((3, 7, 3), 1)` -> `-(((3, 7, 3), 1))`
-                bool literal_need_parens = literal && !is_tuple;
-                // negate always requires parentheses, otherwise -(-1) will be printed as --1
-                bool negate_need_parens = negate && (literal_need_parens || (function && function->name == "negate"));
-                // We don't need parentheses around a single literal.
-                bool need_parens = !literal && frame.need_parens && !negate_need_parens;
+                const auto * subquery = arguments->children[0]->as<ASTSubquery>();
+                bool is_tuple = (literal && literal->value.getType() == Field::Types::Tuple)
+                             || (function && function->name == "tuple" && function->arguments && function->arguments->children.size() > 1);
+                bool is_array = (literal && literal->value.getType() == Field::Types::Array)
+                             || (function && function->name == "array");
 
-                // do not add extra parentheses for functions inside negate, i.e. -(-toUInt64(-(1)))
-                if (negate_need_parens)
+                /// Do not add parentheses for tuple and array literal, otherwise extra parens will be added `-((3, 7, 3), 1)` -> `-(((3, 7, 3), 1))`, `-[1]` -> `-([1])`
+                bool literal_need_parens = literal && !is_tuple && !is_array;
+
+                /// Negate always requires parentheses, otherwise -(-1) will be printed as --1
+                /// Also extra parentheses are needed for subqueries and tuple, because NOT can be parsed as a function:
+                /// not(SELECT 1) cannot be parsed, while not((SELECT 1)) can.
+                /// not((1, 2, 3)) is a function of one argument, while not(1, 2, 3) is a function of three arguments.
+                bool inside_parens = (name == "negate" && (literal_need_parens || (function && function->name == "negate")))
+                    || (subquery && name == "not") || (is_tuple && name == "not");
+
+                /// We DO need parentheses around a single literal
+                /// For example, SELECT (NOT 0) + (NOT 0) cannot be transformed into SELECT NOT 0 + NOT 0, since
+                /// this is equal to SELECT NOT (0 + NOT 0)
+                bool outside_parens = frame.need_parens && !inside_parens;
+
+                /// Do not add extra parentheses for functions inside negate, i.e. -(-toUInt64(-(1)))
+                if (inside_parens)
                     nested_need_parens.need_parens = false;
 
-                if (need_parens)
-                    settings.ostr << '(';
+                if (outside_parens)
+                    ostr << '(';
 
-                settings.ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
+                ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
 
-                if (negate_need_parens)
-                    settings.ostr << '(';
+                if (inside_parens)
+                    ostr << '(';
 
-                arguments->formatImpl(settings, state, nested_need_parens);
+                arguments->format(ostr, settings, state, nested_need_parens);
                 written = true;
 
-                if (negate_need_parens)
-                    settings.ostr << ')';
+                if (inside_parens)
+                    ostr << ')';
 
-                if (need_parens)
-                    settings.ostr << ')';
+                if (outside_parens)
+                    ostr << ')';
 
                 break;
             }
@@ -671,11 +395,11 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
                 }
 
                 if (frame.need_parens)
-                    settings.ostr << '(';
-                arguments->formatImpl(settings, state, nested_need_parens);
-                settings.ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
+                    ostr << '(';
+                arguments->format(ostr, settings, state, nested_need_parens);
+                ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
                 if (frame.need_parens)
-                    settings.ostr << ')';
+                    ostr << ')';
 
                 written = true;
 
@@ -691,25 +415,26 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
         {
             const char * operators[] =
             {
-                "multiply",        " * ",
-                "divide",          " / ",
-                "modulo",          " % ",
-                "plus",            " + ",
-                "minus",           " - ",
-                "notEquals",       " != ",
-                "lessOrEquals",    " <= ",
-                "greaterOrEquals", " >= ",
-                "less",            " < ",
-                "greater",         " > ",
-                "equals",          " = ",
-                "like",            " LIKE ",
-                "ilike",           " ILIKE ",
-                "notLike",         " NOT LIKE ",
-                "notILike",        " NOT ILIKE ",
-                "in",              " IN ",
-                "notIn",           " NOT IN ",
-                "globalIn",        " GLOBAL IN ",
-                "globalNotIn",     " GLOBAL NOT IN ",
+                "multiply",          " * ",
+                "divide",            " / ",
+                "modulo",            " % ",
+                "plus",              " + ",
+                "minus",             " - ",
+                "notEquals",         " != ",
+                "lessOrEquals",      " <= ",
+                "greaterOrEquals",   " >= ",
+                "less",              " < ",
+                "greater",           " > ",
+                "equals",            " = ",
+                "isNotDistinctFrom", " <=> ",
+                "like",              " LIKE ",
+                "ilike",             " ILIKE ",
+                "notLike",           " NOT LIKE ",
+                "notILike",          " NOT ILIKE ",
+                "in",                " IN ",
+                "notIn",             " NOT IN ",
+                "globalIn",          " GLOBAL IN ",
+                "globalNotIn",       " GLOBAL NOT IN ",
                 nullptr
             };
 
@@ -718,13 +443,13 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
                 if (name == std::string_view(func[0]))
                 {
                     if (frame.need_parens)
-                        settings.ostr << '(';
-                    arguments->children[0]->formatImpl(settings, state, nested_need_parens);
-                    settings.ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
+                        ostr << '(';
+                    arguments->children[0]->format(ostr, settings, state, nested_need_parens);
+                    ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
 
                     bool special_hilite = settings.hilite
                         && (name == "like" || name == "notLike" || name == "ilike" || name == "notILike")
-                        && highlightStringLiteralWithMetacharacters(arguments->children[1], settings, "%_");
+                        && highlightStringLiteralWithMetacharacters(arguments->children[1], ostr, "%_");
 
                     /// Format x IN 1 as x IN (1): put parens around rhs even if there is a single element in set.
                     const auto * second_arg_func = arguments->children[1]->as<ASTFunction>();
@@ -738,16 +463,16 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
 
                     if (extra_parents_around_in_rhs)
                     {
-                        settings.ostr << '(';
-                        arguments->children[1]->formatImpl(settings, state, nested_dont_need_parens);
-                        settings.ostr << ')';
+                        ostr << '(';
+                        arguments->children[1]->format(ostr, settings, state, nested_dont_need_parens);
+                        ostr << ')';
                     }
 
                     if (!special_hilite && !extra_parents_around_in_rhs)
-                        arguments->children[1]->formatImpl(settings, state, nested_need_parens);
+                        arguments->children[1]->format(ostr, settings, state, nested_need_parens);
 
                     if (frame.need_parens)
-                        settings.ostr << ')';
+                        ostr << ')';
                     written = true;
                 }
             }
@@ -755,16 +480,16 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
             if (!written && name == "arrayElement"sv)
             {
                 if (frame.need_parens)
-                    settings.ostr << '(';
+                    ostr << '(';
 
-                arguments->children[0]->formatImpl(settings, state, nested_need_parens);
-                settings.ostr << (settings.hilite ? hilite_operator : "") << '[' << (settings.hilite ? hilite_none : "");
-                arguments->children[1]->formatImpl(settings, state, nested_dont_need_parens);
-                settings.ostr << (settings.hilite ? hilite_operator : "") << ']' << (settings.hilite ? hilite_none : "");
+                arguments->children[0]->format(ostr, settings, state, nested_need_parens);
+                ostr << (settings.hilite ? hilite_operator : "") << '[' << (settings.hilite ? hilite_none : "");
+                arguments->children[1]->format(ostr, settings, state, nested_dont_need_parens);
+                ostr << (settings.hilite ? hilite_operator : "") << ']' << (settings.hilite ? hilite_none : "");
                 written = true;
 
                 if (frame.need_parens)
-                    settings.ostr << ')';
+                    ostr << ')';
             }
 
             if (!written && name == "tupleElement"sv)
@@ -802,48 +527,56 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
                 if (tuple_arguments_valid && lit_right)
                 {
                     if (isInt64OrUInt64FieldType(lit_right->value.getType())
-                        && lit_right->value.get<Int64>() >= 0)
+                        && lit_right->value.safeGet<Int64>() >= 0)
                     {
                         if (frame.need_parens)
-                            settings.ostr << '(';
+                            ostr << '(';
 
-                        arguments->children[0]->formatImpl(settings, state, nested_need_parens);
-                        settings.ostr << (settings.hilite ? hilite_operator : "") << "." << (settings.hilite ? hilite_none : "");
-                        arguments->children[1]->formatImpl(settings, state, nested_dont_need_parens);
+                        arguments->children[0]->format(ostr, settings, state, nested_need_parens);
+                        ostr << (settings.hilite ? hilite_operator : "") << "." << (settings.hilite ? hilite_none : "");
+                        arguments->children[1]->format(ostr, settings, state, nested_dont_need_parens);
                         written = true;
 
                         if (frame.need_parens)
-                            settings.ostr << ')';
+                            ostr << ')';
                     }
                 }
             }
 
-            if (!written && name == "lambda"sv)
+            const auto & first_argument = arguments->children[0];
+            const ASTIdentifier * first_argument_identifier = first_argument->as<ASTIdentifier>();
+            const ASTFunction * first_argument_function = first_argument->as<ASTFunction>();
+            bool first_argument_is_tuple = first_argument_function && first_argument_function->name == "tuple";
+
+            /// Only these types of arguments are accepted by the parser of the '->' operator.
+            bool acceptable_first_argument_for_lambda_expression = first_argument_identifier || first_argument_is_tuple;
+
+            if (!written && name == "lambda"sv && acceptable_first_argument_for_lambda_expression)
             {
                 /// Special case: zero elements tuple in lhs of lambda is printed as ().
                 /// Special case: one-element tuple in lhs of lambda is printed as its element.
+                /// If lambda function is not the first element in the list, it has to be put in parentheses.
+                /// Example: f(x, (y -> z)) should not be printed as f((x, y) -> z).
 
-                if (frame.need_parens)
-                    settings.ostr << '(';
+                if (frame.need_parens || frame.list_element_index > 0)
+                    ostr << '(';
 
-                const auto * first_arg_func = arguments->children[0]->as<ASTFunction>();
-                if (first_arg_func
-                    && first_arg_func->name == "tuple"
-                    && first_arg_func->arguments
-                    && (first_arg_func->arguments->children.size() == 1 || first_arg_func->arguments->children.empty()))
+                if (first_argument_is_tuple
+                    && first_argument_function->arguments
+                    && (first_argument_function->arguments->children.size() == 1 || first_argument_function->arguments->children.empty()))
                 {
-                    if (first_arg_func->arguments->children.size() == 1)
-                        first_arg_func->arguments->children[0]->formatImpl(settings, state, nested_need_parens);
+                    if (first_argument_function->arguments->children.size() == 1)
+                        first_argument_function->arguments->children[0]->format(ostr, settings, state, nested_need_parens);
                     else
-                        settings.ostr << "()";
+                        ostr << "()";
                 }
                 else
-                    arguments->children[0]->formatImpl(settings, state, nested_need_parens);
+                    first_argument->format(ostr, settings, state, nested_need_parens);
 
-                settings.ostr << (settings.hilite ? hilite_operator : "") << " -> " << (settings.hilite ? hilite_none : "");
-                arguments->children[1]->formatImpl(settings, state, nested_need_parens);
-                if (frame.need_parens)
-                    settings.ostr << ')';
+                ostr << (settings.hilite ? hilite_operator : "") << " -> " << (settings.hilite ? hilite_none : "");
+                arguments->children[1]->format(ostr, settings, state, nested_need_parens);
+                if (frame.need_parens || frame.list_element_index > 0)
+                    ostr << ')';
                 written = true;
             }
 
@@ -854,15 +587,15 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
                 auto indent0 = settings.one_line ? "" : String(4u * frame.indent, ' ');
                 auto indent1 = settings.one_line ? "" : String(4u * (frame.indent + 1), ' ');
                 auto indent2 = settings.one_line ? "" : String(4u * (frame.indent + 2), ' ');
-                settings.ostr << (settings.hilite ? hilite_function : "") << name << "(" << (settings.hilite ? hilite_none : "") << nl_or_nothing;
+                ostr << (settings.hilite ? hilite_function : "") << name << "(" << (settings.hilite ? hilite_none : "") << nl_or_nothing;
                 FormatStateStacked frame_nested = frame;
                 frame_nested.need_parens = false;
                 frame_nested.indent += 2;
-                arguments->children[0]->formatImpl(settings, state, frame_nested);
-                settings.ostr << nl_or_nothing << indent1 << (settings.hilite ? hilite_keyword : "") << (settings.one_line ? " " : "")
+                arguments->children[0]->format(ostr, settings, state, frame_nested);
+                ostr << nl_or_nothing << indent1 << (settings.hilite ? hilite_keyword : "") << (settings.one_line ? " " : "")
                               << "ELSE " << (settings.hilite ? hilite_none : "") << nl_or_nothing << indent2;
-                arguments->children[1]->formatImpl(settings, state, frame_nested);
-                settings.ostr << nl_or_nothing << indent0 << ")";
+                arguments->children[1]->format(ostr, settings, state, frame_nested);
+                ostr << nl_or_nothing << indent0 << ")";
                 return;
             }
         }
@@ -881,17 +614,17 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
                 if (name == std::string_view(func[0]))
                 {
                     if (frame.need_parens)
-                        settings.ostr << '(';
+                        ostr << '(';
                     for (size_t i = 0; i < arguments->children.size(); ++i)
                     {
                         if (i != 0)
-                            settings.ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
+                            ostr << (settings.hilite ? hilite_operator : "") << func[1] << (settings.hilite ? hilite_none : "");
                         if (arguments->children[i]->as<ASTSetQuery>())
-                            settings.ostr << "SETTINGS ";
-                        arguments->children[i]->formatImpl(settings, state, nested_need_parens);
+                            ostr << "SETTINGS ";
+                        arguments->children[i]->format(ostr, settings, state, nested_need_parens);
                     }
                     if (frame.need_parens)
-                        settings.ostr << ')';
+                        ostr << ')';
                     written = true;
                 }
             }
@@ -899,66 +632,72 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
 
         if (!written && name == "array"sv)
         {
-            settings.ostr << (settings.hilite ? hilite_operator : "") << '[' << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << '[' << (settings.hilite ? hilite_none : "");
             for (size_t i = 0; i < arguments->children.size(); ++i)
             {
                 if (i != 0)
-                    settings.ostr << ", ";
+                    ostr << ", ";
                 if (arguments->children[i]->as<ASTSetQuery>())
-                    settings.ostr << "SETTINGS ";
-                arguments->children[i]->formatImpl(settings, state, nested_dont_need_parens);
+                    ostr << "SETTINGS ";
+                nested_dont_need_parens.list_element_index = i;
+                arguments->children[i]->format(ostr, settings, state, nested_dont_need_parens);
             }
-            settings.ostr << (settings.hilite ? hilite_operator : "") << ']' << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << ']' << (settings.hilite ? hilite_none : "");
             written = true;
         }
 
         if (!written && arguments->children.size() >= 2 && name == "tuple"sv)
         {
-            settings.ostr << (settings.hilite ? hilite_operator : "") << '(' << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << ((frame.need_parens && !alias.empty()) ? "tuple" : "") << '('
+                          << (settings.hilite ? hilite_none : "");
+
             for (size_t i = 0; i < arguments->children.size(); ++i)
             {
                 if (i != 0)
-                    settings.ostr << ", ";
+                    ostr << ", ";
                 if (arguments->children[i]->as<ASTSetQuery>())
-                    settings.ostr << "SETTINGS ";
-                arguments->children[i]->formatImpl(settings, state, nested_dont_need_parens);
+                    ostr << "SETTINGS ";
+                nested_dont_need_parens.list_element_index = i;
+                arguments->children[i]->format(ostr, settings, state, nested_dont_need_parens);
             }
-            settings.ostr << (settings.hilite ? hilite_operator : "") << ')' << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << ')' << (settings.hilite ? hilite_none : "");
             written = true;
         }
 
         if (!written && name == "map"sv)
         {
-            settings.ostr << (settings.hilite ? hilite_operator : "") << "map(" << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << "map(" << (settings.hilite ? hilite_none : "");
             for (size_t i = 0; i < arguments->children.size(); ++i)
             {
                 if (i != 0)
-                    settings.ostr << ", ";
+                    ostr << ", ";
                 if (arguments->children[i]->as<ASTSetQuery>())
-                    settings.ostr << "SETTINGS ";
-                arguments->children[i]->formatImpl(settings, state, nested_dont_need_parens);
+                    ostr << "SETTINGS ";
+                nested_dont_need_parens.list_element_index = i;
+                arguments->children[i]->format(ostr, settings, state, nested_dont_need_parens);
             }
-            settings.ostr << (settings.hilite ? hilite_operator : "") << ')' << (settings.hilite ? hilite_none : "");
+            ostr << (settings.hilite ? hilite_operator : "") << ')' << (settings.hilite ? hilite_none : "");
             written = true;
         }
     }
 
     if (written)
     {
-        return finishFormatWithWindow(settings, state, frame);
+        finishFormatWithWindow(ostr, settings, state, frame);
+        return;
     }
 
-    settings.ostr << (settings.hilite ? hilite_function : "") << name;
+    ostr << (settings.hilite ? hilite_function : "") << name;
 
     if (parameters)
     {
-        settings.ostr << '(' << (settings.hilite ? hilite_none : "");
-        parameters->formatImpl(settings, state, nested_dont_need_parens);
-        settings.ostr << (settings.hilite ? hilite_function : "") << ')';
+        ostr << '(' << (settings.hilite ? hilite_none : "");
+        parameters->format(ostr, settings, state, nested_dont_need_parens);
+        ostr << (settings.hilite ? hilite_function : "") << ')';
     }
 
     if ((arguments && !arguments->children.empty()) || !no_empty_args)
-        settings.ostr << '(' << (settings.hilite ? hilite_none : "");
+        ostr << '(' << (settings.hilite ? hilite_none : "");
 
     if (arguments)
     {
@@ -966,53 +705,83 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
             && (name == "match" || name == "extract" || name == "extractAll" || name == "replaceRegexpOne"
                 || name == "replaceRegexpAll");
 
-        auto secret_arguments = std::make_pair(static_cast<size_t>(-1), static_cast<size_t>(-1));
+        FunctionSecretArgumentsFinder::Result secret_arguments;
         if (!settings.show_secrets)
-            secret_arguments = FunctionSecretArgumentsFinder(*this).getRange();
+            secret_arguments = FunctionSecretArgumentsFinderAST(*this).getResult();
 
         for (size_t i = 0, size = arguments->children.size(); i < size; ++i)
         {
             if (i != 0)
-                settings.ostr << ", ";
-            if (arguments->children[i]->as<ASTSetQuery>())
-                settings.ostr << "SETTINGS ";
+                ostr << ", ";
 
-            if (!settings.show_secrets && (secret_arguments.first <= i) && (i < secret_arguments.second))
+            const auto & argument = arguments->children[i];
+            if (argument->as<ASTSetQuery>())
+                ostr << "SETTINGS ";
+
+            if (!settings.show_secrets)
             {
-                settings.ostr << "'[HIDDEN]'";
-                if (size - 1 < secret_arguments.second)
-                    break; /// All other arguments should also be hidden.
-                continue;
+                if (secret_arguments.start <= i && i < secret_arguments.start + secret_arguments.count)
+                {
+                    if (secret_arguments.are_named)
+                    {
+                        if (const auto * func_ast = typeid_cast<const ASTFunction *>(argument.get()))
+                            func_ast->arguments->children[0]->format(ostr, settings, state, nested_dont_need_parens);
+                        else
+                            argument->format(ostr, settings, state, nested_dont_need_parens);
+                        ostr << (settings.hilite ? hilite_operator : "") << " = " << (settings.hilite ? hilite_none : "");
+                    }
+                    if (!secret_arguments.replacement.empty())
+                    {
+                        ostr << "'" << secret_arguments.replacement << "'";
+                    }
+                    else
+                    {
+                        ostr << "'[HIDDEN]'";
+                    }
+                    if (size <= secret_arguments.start + secret_arguments.count && !secret_arguments.are_named)
+                        break; /// All other arguments should also be hidden.
+                    continue;
+                }
+
+                const ASTFunction * function = argument->as<ASTFunction>();
+                if (function && function->arguments && std::count(secret_arguments.nested_maps.begin(), secret_arguments.nested_maps.end(), function->name) != 0)
+                {
+                    /// headers('foo' = '[HIDDEN]', 'bar' = '[HIDDEN]')
+                    ostr << (settings.hilite ? hilite_function : "") << function->name << (settings.hilite ? hilite_none : "") << "(";
+                    for (size_t j = 0; j < function->arguments->children.size(); ++j)
+                    {
+                        if (j != 0)
+                            ostr << ", ";
+                        auto inner_arg = function->arguments->children[j];
+                        if (!formatNamedArgWithHiddenValue(inner_arg.get(), ostr, settings, state, nested_dont_need_parens))
+                            inner_arg->format(ostr, settings, state, nested_dont_need_parens);
+                    }
+                    ostr << ")";
+                    continue;
+                }
             }
 
             if ((i == 1) && special_hilite_regexp
-                && highlightStringLiteralWithMetacharacters(arguments->children[i], settings, "|()^$.[]?*+{:-"))
+                && highlightStringLiteralWithMetacharacters(argument, ostr, "|()^$.[]?*+{:-"))
             {
                 continue;
             }
 
-            arguments->children[i]->formatImpl(settings, state, nested_dont_need_parens);
+            nested_dont_need_parens.list_element_index = i;
+            argument->format(ostr, settings, state, nested_dont_need_parens);
         }
     }
 
     if ((arguments && !arguments->children.empty()) || !no_empty_args)
-        settings.ostr << (settings.hilite ? hilite_function : "") << ')';
+        ostr << (settings.hilite ? hilite_function : "") << ')';
 
-    settings.ostr << (settings.hilite ? hilite_none : "");
-
-    return finishFormatWithWindow(settings, state, frame);
+    ostr << (settings.hilite ? hilite_none : "");
+    finishFormatWithWindow(ostr, settings, state, frame);
 }
 
 bool ASTFunction::hasSecretParts() const
 {
-    if (arguments)
-    {
-        size_t num_arguments = arguments->children.size();
-        auto secret_arguments = FunctionSecretArgumentsFinder(*this).getRange();
-        if ((secret_arguments.first < num_arguments) && (secret_arguments.first < secret_arguments.second))
-            return true;
-    }
-    return childrenHaveSecretParts();
+    return (FunctionSecretArgumentsFinderAST(*this).getResult().hasSecrets()) || childrenHaveSecretParts();
 }
 
 String getFunctionName(const IAST * ast)
@@ -1020,7 +789,9 @@ String getFunctionName(const IAST * ast)
     String res;
     if (tryGetFunctionNameInto(ast, res))
         return res;
-    throw Exception(ast ? queryToString(*ast) + " is not an function" : "AST node is nullptr", ErrorCodes::UNEXPECTED_AST_STRUCTURE);
+    if (ast)
+        throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "{} is not an function", queryToString(*ast));
+    throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "AST node is nullptr");
 }
 
 std::optional<String> tryGetFunctionName(const IAST * ast)
@@ -1041,6 +812,17 @@ bool tryGetFunctionNameInto(const IAST * ast, String & name)
             return true;
         }
     }
+    return false;
+}
+
+bool isASTLambdaFunction(const ASTFunction & function)
+{
+    if (function.name == "lambda" && function.arguments && function.arguments->children.size() == 2)
+    {
+        const auto * lambda_args_tuple = function.arguments->children.at(0)->as<ASTFunction>();
+        return lambda_args_tuple && lambda_args_tuple->name == "tuple";
+    }
+
     return false;
 }
 

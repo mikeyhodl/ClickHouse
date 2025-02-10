@@ -1,10 +1,9 @@
 ---
+description: A benchmark dataset used for comparing the performance of data warehousing solutions.
 slug: /en/getting-started/example-datasets/amplab-benchmark
 sidebar_label: AMPLab Big Data Benchmark
-description: A benchmark dataset used for comparing the performance of data warehousing solutions.
+title: AMPLab Big Data Benchmark
 ---
-
-# AMPLab Big Data Benchmark
 
 See https://amplab.cs.berkeley.edu/benchmark/
 
@@ -124,5 +123,3 @@ GROUP BY sourceIP
 ORDER BY totalRevenue DESC
 LIMIT 1
 ```
-
-[Original article](https://clickhouse.com/docs/en/getting_started/example_datasets/amplab_benchmark/) <!--hide-->

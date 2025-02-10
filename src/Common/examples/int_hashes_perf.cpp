@@ -1,6 +1,4 @@
-#ifdef HAS_RESERVED_IDENTIFIER
 #pragma clang diagnostic ignored "-Wreserved-identifier"
-#endif
 
 #if defined (OS_LINUX)
 #   include <sched.h>
@@ -36,7 +34,8 @@ static void setAffinity()
 static inline ALWAYS_INLINE UInt64 rdtsc()
 {
 #if defined(__x86_64__)
-    UInt32 a, d;
+    UInt32 a;
+    UInt32 d;
     __asm__ volatile ("rdtsc" : "=a" (a), "=d" (d));
     return static_cast<UInt64>(a) | (static_cast<UInt64>(d) << 32);
 #else
