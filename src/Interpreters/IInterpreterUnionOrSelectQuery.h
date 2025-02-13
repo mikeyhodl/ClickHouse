@@ -3,6 +3,7 @@
 #include <Interpreters/Context.h>
 #include <Interpreters/IInterpreter.h>
 #include <Interpreters/SelectQueryOptions.h>
+#include <Core/Block.h>
 #include <Parsers/IAST_fwd.h>
 #include <DataTypes/DataTypesNumber.h>
 
@@ -17,24 +18,11 @@ public:
     {
     }
 
-    IInterpreterUnionOrSelectQuery(const ASTPtr & query_ptr_, const ContextMutablePtr & context_, const SelectQueryOptions & options_)
-        : query_ptr(query_ptr_)
-        , context(context_)
-        , options(options_)
-        , max_streams(context->getSettingsRef().max_threads)
-    {
-        if (options.shard_num)
-            context->addSpecialScalar(
-                "_shard_num",
-                Block{{DataTypeUInt32().createColumnConst(1, *options.shard_num), std::make_shared<DataTypeUInt32>(), "_shard_num"}});
-        if (options.shard_count)
-            context->addSpecialScalar(
-                "_shard_count",
-                Block{{DataTypeUInt32().createColumnConst(1, *options.shard_count), std::make_shared<DataTypeUInt32>(), "_shard_count"}});
-    }
+    IInterpreterUnionOrSelectQuery(const ASTPtr & query_ptr_, const ContextMutablePtr & context_, const SelectQueryOptions & options_);
 
     virtual void buildQueryPlan(QueryPlan & query_plan) = 0;
     QueryPipelineBuilder buildQueryPipeline();
+    QueryPipelineBuilder buildQueryPipeline(QueryPlan & query_plan);
 
     virtual void ignoreWithTotals() = 0;
 
@@ -43,8 +31,6 @@ public:
     Block getSampleBlock() { return result_header; }
 
     size_t getMaxStreams() const { return max_streams; }
-
-    void extendQueryLogElemImpl(QueryLogElement & elem, const ASTPtr & ast, ContextPtr context) const override;
 
     /// Returns whether the query uses the view source from the Context
     /// The view source is a virtual storage that currently only materialized views use to replace the source table

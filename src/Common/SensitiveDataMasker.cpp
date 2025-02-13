@@ -4,15 +4,13 @@
 #include <string>
 #include <atomic>
 
-#include <re2/re2.h>
-#include <re2/stringpiece.h>
-
 #include <Poco/Util/AbstractConfiguration.h>
 
 #include <Common/logger_useful.h>
+#include <Common/re2.h>
 
 #include <Common/Exception.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 #include <Common/ProfileEvents.h>
 
 #ifndef NDEBUG
@@ -44,7 +42,7 @@ private:
     const std::string regexp_string;
 
     const RE2 regexp;
-    const re2::StringPiece replacement;
+    const std::string_view replacement;
 
 #ifndef NDEBUG
     mutable std::atomic<std::uint64_t> matches_count = 0;
@@ -62,10 +60,10 @@ public:
         , replacement(replacement_string)
     {
         if (!regexp.ok())
-            throw DB::Exception(
-                "SensitiveDataMasker: cannot compile re2: " + regexp_string_ + ", error: " + regexp.error()
-                    + ". Look at https://github.com/google/re2/wiki/Syntax for reference.",
-                DB::ErrorCodes::CANNOT_COMPILE_REGEXP);
+            throw Exception(ErrorCodes::CANNOT_COMPILE_REGEXP,
+                "SensitiveDataMasker: cannot compile re2: {}, error: {}. "
+                "Look at https://github.com/google/re2/wiki/Syntax for reference.",
+                regexp_string_, regexp.error());
     }
 
     uint64_t apply(std::string & data) const
@@ -87,20 +85,25 @@ public:
 
 SensitiveDataMasker::~SensitiveDataMasker() = default;
 
-std::unique_ptr<SensitiveDataMasker> SensitiveDataMasker::sensitive_data_masker = nullptr;
+SensitiveDataMasker::MaskerMultiVersion SensitiveDataMasker::sensitive_data_masker{};
 
-void SensitiveDataMasker::setInstance(std::unique_ptr<SensitiveDataMasker> sensitive_data_masker_)
+void SensitiveDataMasker::setInstance(std::unique_ptr<SensitiveDataMasker>&& sensitive_data_masker_)
 {
+
     if (!sensitive_data_masker_)
-        throw Exception("Logical error: the 'sensitive_data_masker' is not set", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "The 'sensitive_data_masker' is not set");
 
     if (sensitive_data_masker_->rulesCount() > 0)
     {
-        sensitive_data_masker = std::move(sensitive_data_masker_);
+        sensitive_data_masker.set(std::move(sensitive_data_masker_));
+    }
+    else
+    {
+        sensitive_data_masker.set(nullptr);
     }
 }
 
-SensitiveDataMasker * SensitiveDataMasker::getInstance()
+SensitiveDataMasker::MaskerMultiVersion::Version SensitiveDataMasker::getInstance()
 {
     return sensitive_data_masker.get();
 }
@@ -109,7 +112,7 @@ SensitiveDataMasker::SensitiveDataMasker(const Poco::Util::AbstractConfiguration
 {
     Poco::Util::AbstractConfiguration::Keys keys;
     config.keys(config_prefix, keys);
-    Poco::Logger * logger = &Poco::Logger::get("SensitiveDataMaskerConfigRead");
+    LoggerPtr logger = getLogger("SensitiveDataMaskerConfigRead");
 
     std::set<std::string> used_names;
 
@@ -123,18 +126,17 @@ SensitiveDataMasker::SensitiveDataMasker(const Poco::Util::AbstractConfiguration
 
             if (!used_names.insert(rule_name).second)
             {
-                throw Exception(
-                    "query_masking_rules configuration contains more than one rule named '" + rule_name + "'.",
-                    ErrorCodes::INVALID_CONFIG_PARAMETER);
+                throw Exception(ErrorCodes::INVALID_CONFIG_PARAMETER,
+                                "query_masking_rules configuration contains more than one rule named '{}'.", rule_name);
             }
 
             auto regexp = config.getString(rule_config_prefix + ".regexp", "");
 
             if (regexp.empty())
             {
-                throw Exception(
-                    "query_masking_rules configuration, rule '" + rule_name + "' has no <regexp> node or <regexp> is empty.",
-                    ErrorCodes::NO_ELEMENTS_IN_CONFIG);
+                throw Exception(ErrorCodes::NO_ELEMENTS_IN_CONFIG,
+                                "query_masking_rules configuration, rule '{}' has no <regexp> node or <regexp> "
+                                "is empty.", rule_name);
             }
 
             auto replace = config.getString(rule_config_prefix + ".replace", "******");
@@ -200,11 +202,19 @@ std::string wipeSensitiveDataAndCutToLength(const std::string & str, size_t max_
 {
     std::string res = str;
 
-    if (auto * masker = SensitiveDataMasker::getInstance())
+    if (auto masker = SensitiveDataMasker::getInstance())
         masker->wipeSensitiveData(res);
 
-    if (max_length && (res.length() > max_length))
+    size_t length = res.length();
+    if (max_length && (length > max_length))
+    {
+        constexpr size_t max_extra_msg_len = sizeof("... (truncated 18446744073709551615 characters)");
+        if (max_length < max_extra_msg_len)
+            return "(removed " + std::to_string(length) + " characters)";
+        max_length -= max_extra_msg_len;
         res.resize(max_length);
+        res.append("... (truncated " + std::to_string(length - max_length) +  " characters)");
+    }
 
     return res;
 }

@@ -36,6 +36,10 @@ private:
     bool allowSyncAfterError() const override { return true; }
     void syncAfterError() override;
 
+    bool supportsCountRows() const override { return true; }
+    size_t countRows(size_t max_block_size) override;
+    bool supportsCustomSerializations() const override { return true; }
+
     const FormatSettings format_settings;
 
     /// Buffer for the read from the stream the field name. Used when you have to copy it.

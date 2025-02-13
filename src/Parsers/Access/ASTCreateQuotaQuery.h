@@ -38,6 +38,7 @@ public:
     Strings names;
     String new_name;
     std::optional<QuotaKeyType> key_type;
+    String storage_name;
 
     struct Limits
     {
@@ -52,8 +53,13 @@ public:
 
     String getID(char) const override;
     ASTPtr clone() const override;
-    void formatImpl(const FormatSettings & settings, FormatState &, FormatStateStacked) const override;
     void replaceCurrentUserTag(const String & current_user_name) const;
     ASTPtr getRewrittenASTWithoutOnCluster(const WithoutOnClusterASTRewriteParams &) const override { return removeOnCluster<ASTCreateQuotaQuery>(clone()); }
+
+    QueryKind getQueryKind() const override { return QueryKind::Create; }
+
+protected:
+    void formatImpl(WriteBuffer & ostr, const FormatSettings & settings, FormatState &, FormatStateStacked) const override;
 };
+
 }

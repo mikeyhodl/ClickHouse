@@ -1,10 +1,10 @@
 #pragma once
 
-#include <Processors/Formats/IRowInputFormat.h>
+#include <Processors/Formats/Impl/JSONEachRowRowInputFormat.h>
 #include <Processors/Formats/ISchemaReader.h>
-#include <Formats/FormatFactory.h>
 #include <IO/PeekableReadBuffer.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypeObjectDeprecated.h>
 #include <DataTypes/DataTypeObject.h>
 
 namespace DB
@@ -13,30 +13,16 @@ namespace DB
 class ReadBuffer;
 
 /// This format parses a sequence of JSON objects separated by newlines, spaces and/or comma.
-class JSONAsRowInputFormat : public IRowInputFormat
+class JSONAsRowInputFormat : public JSONEachRowRowInputFormat
 {
 public:
-    JSONAsRowInputFormat(const Block & header_, ReadBuffer & in_, Params params_);
-
-    void resetParser() override;
-    void setReadBuffer(ReadBuffer & in_) override;
+    JSONAsRowInputFormat(const Block & header_, ReadBuffer & in_, Params params_, const FormatSettings & format_settings);
 
 private:
-    JSONAsRowInputFormat(const Block & header_, std::unique_ptr<PeekableReadBuffer> buf_, Params params_);
-
     bool readRow(MutableColumns & columns, RowReadExtension & ext) override;
-
-    void readPrefix() override;
-    void readSuffix() override;
 
 protected:
     virtual void readJSONObject(IColumn & column) = 0;
-    std::unique_ptr<PeekableReadBuffer> buf;
-
-private:
-    /// This flag is needed to know if data is in square brackets.
-    bool data_in_square_brackets = false;
-    bool allow_new_rows = true;
 };
 
 /// Each JSON object is parsed as a whole to string.
@@ -44,11 +30,18 @@ private:
 class JSONAsStringRowInputFormat final : public JSONAsRowInputFormat
 {
 public:
-    JSONAsStringRowInputFormat(const Block & header_, ReadBuffer & in_, Params params_);
+    JSONAsStringRowInputFormat(const Block & header_, ReadBuffer & in_, Params params_, const FormatSettings & format_settings_);
     String getName() const override { return "JSONAsStringRowInputFormat"; }
 
+    void setReadBuffer(ReadBuffer & in_) override;
+    void resetReadBuffer() override;
+
 private:
+    JSONAsStringRowInputFormat(const Block & header_, std::unique_ptr<PeekableReadBuffer> buf_, Params params_, const FormatSettings & format_settings_);
+
     void readJSONObject(IColumn & column) override;
+
+    std::unique_ptr<PeekableReadBuffer> buf;
 };
 
 
@@ -61,8 +54,8 @@ public:
     String getName() const override { return "JSONAsObjectRowInputFormat"; }
 
 private:
+    Chunk getChunkForCount(size_t rows) override;
     void readJSONObject(IColumn & column) override;
-    const FormatSettings format_settings;
 };
 
 class JSONAsStringExternalSchemaReader : public IExternalSchemaReader
@@ -77,10 +70,17 @@ public:
 class JSONAsObjectExternalSchemaReader : public IExternalSchemaReader
 {
 public:
+    explicit JSONAsObjectExternalSchemaReader(const FormatSettings & settings_);
+
     NamesAndTypesList readSchema() override
     {
-        return {{"json", std::make_shared<DataTypeObject>("json", false)}};
+        if (settings.json.allow_json_type)
+            return {{"json", std::make_shared<DataTypeObject>(DataTypeObject::SchemaFormat::JSON)}};
+        return {{"json", std::make_shared<DataTypeObjectDeprecated>("json", false)}};
     }
+
+private:
+    FormatSettings settings;
 };
 
 }
