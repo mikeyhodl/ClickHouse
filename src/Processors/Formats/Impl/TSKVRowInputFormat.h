@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Core/Block.h>
 #include <Processors/Formats/IRowInputFormat.h>
 #include <Processors/Formats/ISchemaReader.h>
 #include <Formats/FormatSettings.h>
@@ -35,6 +34,10 @@ private:
     bool readRow(MutableColumns & columns, RowReadExtension &) override;
     bool allowSyncAfterError() const override { return true; }
     void syncAfterError() override;
+
+    bool supportsCountRows() const override { return true; }
+    size_t countRows(size_t max_block_size) override;
+    bool supportsCustomSerializations() const override { return true; }
 
     const FormatSettings format_settings;
 

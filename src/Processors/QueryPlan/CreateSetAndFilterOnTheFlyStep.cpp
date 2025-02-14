@@ -3,7 +3,9 @@
 
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <IO/Operators.h>
+#include <Interpreters/SetWithState.h>
 #include <Common/JSONBuilder.h>
+#include <Common/logger_useful.h>
 #include <Core/ColumnWithTypeAndName.h>
 #include <Core/ColumnsWithTypeAndName.h>
 #include <Processors/IProcessor.h>
@@ -40,7 +42,6 @@ static ITransformingStep::Traits getTraits()
     return ITransformingStep::Traits
     {
         {
-            .preserves_distinct_columns = true,
             .returns_single_stream = false,
             .preserves_number_of_streams = true,
             .preserves_sorting = true,
@@ -62,7 +63,7 @@ public:
     {
         assert(!rhs_ports.first->isConnected() && !rhs_ports.second->isConnected());
 
-        std::lock_guard<std::mutex> lock(mux);
+        std::lock_guard lock(mux);
         if (input_port || output_port)
         {
             assert(input_port && output_port);
@@ -97,15 +98,15 @@ CreateSetAndFilterOnTheFlyStep::CrosswiseConnectionPtr CreateSetAndFilterOnTheFl
 }
 
 CreateSetAndFilterOnTheFlyStep::CreateSetAndFilterOnTheFlyStep(
-    const DataStream & input_stream_,
+    const Header & input_header_,
     const Names & column_names_,
     size_t max_rows_in_set_,
     CrosswiseConnectionPtr crosswise_connection_,
     JoinTableSide position_)
-    : ITransformingStep(input_stream_, input_stream_.header, getTraits())
+    : ITransformingStep(input_header_, input_header_, getTraits())
     , column_names(column_names_)
     , max_rows_in_set(max_rows_in_set_)
-    , own_set(std::make_shared<SetWithState>(SizeLimits(max_rows_in_set, 0, OverflowMode::BREAK), false, true))
+    , own_set(std::make_shared<SetWithState>(SizeLimits(max_rows_in_set, 0, OverflowMode::BREAK), 0, true))
     , filtering_set(nullptr)
     , crosswise_connection(crosswise_connection_)
     , position(position_)
@@ -113,10 +114,10 @@ CreateSetAndFilterOnTheFlyStep::CreateSetAndFilterOnTheFlyStep(
     if (crosswise_connection == nullptr)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Crosswise connection is not initialized");
 
-    if (input_streams.size() != 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Step requires exactly one input stream, got {}", input_streams.size());
+    if (input_headers.size() != 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Step requires exactly one input stream, got {}", input_headers.size());
 
-    own_set->setHeader(getColumnSubset(input_streams[0].header, column_names));
+    own_set->setHeader(getColumnSubset(input_headers[0], column_names));
 }
 
 void CreateSetAndFilterOnTheFlyStep::transformPipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
@@ -141,7 +142,7 @@ void CreateSetAndFilterOnTheFlyStep::transformPipeline(QueryPipelineBuilder & pi
         /// Add balancing transform
         auto idx = position == JoinTableSide::Left ? PingPongProcessor::First : PingPongProcessor::Second;
         auto stream_balancer = std::make_shared<ReadHeadBalancedProcessor>(input_header, num_ports, max_rows_in_set, idx);
-        stream_balancer->setDescription(getStepDescription());
+        stream_balancer->setDescription("Reads rows from two streams evenly");
 
         /// Regular inputs just bypass data for respective ports
         connectAllInputs(ports, stream_balancer->getInputs(), num_ports);
@@ -163,7 +164,7 @@ void CreateSetAndFilterOnTheFlyStep::transformPipeline(QueryPipelineBuilder & pi
         {
             auto & port = *output_it++;
             auto transform = std::make_shared<FilterBySetOnTheFlyTransform>(port.getHeader(), column_names, filtering_set);
-            transform->setDescription(this->getStepDescription());
+            transform->setDescription("Filter rows using other join table side's set");
             connect(port, transform->getInputPort());
             result_transforms.emplace_back(std::move(transform));
         }
@@ -191,15 +192,19 @@ void CreateSetAndFilterOnTheFlyStep::describeActions(FormatSettings & settings) 
     settings.out << '\n';
 }
 
-void CreateSetAndFilterOnTheFlyStep::updateOutputStream()
+void CreateSetAndFilterOnTheFlyStep::updateOutputHeader()
 {
-    if (input_streams.size() != 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "{} requires exactly one input stream, got {}", getName(), input_streams.size());
+    if (input_headers.size() != 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "{} requires exactly one input stream, got {}", getName(), input_headers.size());
 
-    own_set->setHeader(getColumnSubset(input_streams[0].header, column_names));
+    own_set->setHeader(getColumnSubset(input_headers[0], column_names));
 
-    output_stream = input_streams[0];
+    output_header = input_headers.front();
 }
 
+bool CreateSetAndFilterOnTheFlyStep::isColumnPartOfSetKey(const String & column_name) const
+{
+    return std::find(column_names.begin(), column_names.end(), column_name) != column_names.end();
+}
 
 }

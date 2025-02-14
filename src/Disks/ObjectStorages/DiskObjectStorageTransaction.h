@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <Disks/IDiskTransaction.h>
 #include <Disks/ObjectStorages/DiskObjectStorage.h>
 #include <Disks/ObjectStorages/IMetadataStorage.h>
@@ -34,7 +35,7 @@ public:
     virtual std::string getInfoForLog() const = 0;
 };
 
-using DiskObjectStorageOperation = std::unique_ptr<IDiskObjectStorageOperation>;
+using DiskObjectStorageOperation = std::shared_ptr<IDiskObjectStorageOperation>;
 
 using DiskObjectStorageOperations = std::vector<DiskObjectStorageOperation>;
 
@@ -50,9 +51,9 @@ using DiskObjectStorageOperations = std::vector<DiskObjectStorageOperation>;
 ///
 /// If something wrong happen on step 1 or 2 reverts all applied operations.
 /// If finalize failed -- nothing is reverted, garbage is left in blob storage.
-struct DiskObjectStorageTransaction final : public IDiskTransaction, std::enable_shared_from_this<DiskObjectStorageTransaction>
+struct DiskObjectStorageTransaction : public IDiskTransaction, std::enable_shared_from_this<DiskObjectStorageTransaction>
 {
-private:
+protected:
     IObjectStorage & object_storage;
     IMetadataStorage & metadata_storage;
 
@@ -63,6 +64,12 @@ private:
 
     DiskObjectStorageOperations operations_to_execute;
 
+    DiskObjectStorageTransaction(
+        IObjectStorage & object_storage_,
+        IMetadataStorage & metadata_storage_,
+        DiskObjectStorageRemoteMetadataRestoreHelper * metadata_helper_,
+        MetadataTransactionPtr metadata_transaction_);
+
 public:
     DiskObjectStorageTransaction(
         IObjectStorage & object_storage_,
@@ -70,6 +77,7 @@ public:
         DiskObjectStorageRemoteMetadataRestoreHelper * metadata_helper_);
 
     void commit() override;
+    void undo() override;
 
     void createDirectory(const std::string & path) override;
 
@@ -85,7 +93,9 @@ public:
 
     void createFile(const String & path) override;
 
-    void copyFile(const std::string & from_file_path, const std::string & to_file_path) override;
+    void truncateFile(const String & path, size_t size) override;
+
+    void copyFile(const std::string & from_file_path, const std::string & to_file_path, const ReadSettings & read_settings, const WriteSettings &) override;
 
     /// writeFile is a difficult function for transactions.
     /// Now it's almost noop because metadata added to transaction in finalize method
@@ -97,6 +107,9 @@ public:
         WriteMode mode = WriteMode::Rewrite,
         const WriteSettings & settings = {},
         bool autocommit = true) override;
+
+    /// Write a file using a custom function to write an object to the disk's object storage.
+    void writeFileUsingBlobWritingFunction(const String & path, WriteMode mode, WriteBlobFunction && write_blob_function) override;
 
     void removeFile(const std::string & path) override;
     void removeFileIfExists(const std::string & path) override;
@@ -112,6 +125,21 @@ public:
     void chmod(const String & path, mode_t mode) override;
     void setReadOnly(const std::string & path) override;
     void createHardLink(const std::string & src_path, const std::string & dst_path) override;
+};
+
+struct MultipleDisksObjectStorageTransaction final : public DiskObjectStorageTransaction, std::enable_shared_from_this<MultipleDisksObjectStorageTransaction>
+{
+    IObjectStorage& destination_object_storage;
+    IMetadataStorage& destination_metadata_storage;
+
+    MultipleDisksObjectStorageTransaction(
+        IObjectStorage & object_storage_,
+        IMetadataStorage & metadata_storage_,
+        IObjectStorage& destination_object_storage,
+        IMetadataStorage& destination_metadata_storage,
+        DiskObjectStorageRemoteMetadataRestoreHelper * metadata_helper_);
+
+    void copyFile(const std::string & from_file_path, const std::string & to_file_path, const ReadSettings & read_settings, const WriteSettings &) override;
 };
 
 using DiskObjectStorageTransactionPtr = std::shared_ptr<DiskObjectStorageTransaction>;

@@ -1,7 +1,7 @@
-#include <Common/hex.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionStringToString.h>
 #include <base/find_symbols.h>
+#include <base/hex.h>
 
 
 namespace DB
@@ -14,27 +14,32 @@ namespace ErrorCodes
 static size_t encodeURL(const char * __restrict src, size_t src_size, char * __restrict dst, bool space_as_plus)
 {
     char * dst_pos = dst;
-    for (size_t i = 0; i < src_size; i++)
+    for (size_t i = 0; i < src_size; ++i)
     {
         if ((src[i] >= '0' && src[i] <= '9') || (src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z')
             || src[i] == '-' || src[i] == '_' || src[i] == '.' || src[i] == '~')
         {
-            *dst_pos++ = src[i];
+            *dst_pos = src[i];
+            ++dst_pos;
         }
         else if (src[i] == ' ' && space_as_plus)
         {
-            *dst_pos++ = '+';
+            *dst_pos = '+';
+            ++dst_pos;
         }
         else
         {
-            *dst_pos++ = '%';
-            *dst_pos++ = hexDigitUppercase(src[i] >> 4);
-            *dst_pos++ = hexDigitUppercase(src[i] & 0xf);
+            dst_pos[0] = '%';
+            ++dst_pos;
+            writeHexByteUppercase(src[i], dst_pos);
+            dst_pos += 2;
         }
     }
-    *dst_pos++ = src[src_size];
+    *dst_pos = 0;
+    ++dst_pos;
     return dst_pos - dst;
 }
+
 
 /// We assume that size of the dst buf isn't less than src_size.
 static size_t decodeURL(const char * __restrict src, size_t src_size, char * __restrict dst, bool plus_as_space)
@@ -52,7 +57,7 @@ static size_t decodeURL(const char * __restrict src, size_t src_size, char * __r
         {
             break;
         }
-        else if (*src_curr_pos == '+')
+        if (*src_curr_pos == '+')
         {
             if (!plus_as_space)
             {
@@ -116,22 +121,27 @@ enum URLCodeStrategy
 template <URLCodeStrategy code_strategy, bool space_as_plus>
 struct CodeURLComponentImpl
 {
-    static void vector(const ColumnString::Chars & data, const ColumnString::Offsets & offsets,
-        ColumnString::Chars & res_data, ColumnString::Offsets & res_offsets)
+    static void vector(
+        const ColumnString::Chars & data, const ColumnString::Offsets & offsets,
+        ColumnString::Chars & res_data, ColumnString::Offsets & res_offsets,
+        size_t input_rows_count)
     {
         if (code_strategy == encode)
-            //the destination(res_data) string is at most three times the length of the source string
+        {
+            /// the destination(res_data) string is at most three times the length of the source string
             res_data.resize(data.size() * 3);
+        }
         else
+        {
             res_data.resize(data.size());
+        }
 
-        size_t size = offsets.size();
-        res_offsets.resize(size);
+        res_offsets.resize(input_rows_count);
 
         size_t prev_offset = 0;
         size_t res_offset = 0;
 
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             const char * src_data = reinterpret_cast<const char *>(&data[prev_offset]);
             size_t src_size = offsets[i] - prev_offset;
@@ -156,9 +166,9 @@ struct CodeURLComponentImpl
         res_data.resize(res_offset);
     }
 
-    [[noreturn]] static void vectorFixed(const ColumnString::Chars &, size_t, ColumnString::Chars &)
+    [[noreturn]] static void vectorFixed(const ColumnString::Chars &, size_t, ColumnString::Chars &, size_t)
     {
-        throw Exception("Column of type FixedString is not supported by URL functions", ErrorCodes::ILLEGAL_COLUMN);
+        throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Column of type FixedString is not supported by URL functions");
     }
 };
 

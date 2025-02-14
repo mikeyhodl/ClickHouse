@@ -1,4 +1,5 @@
 #include <IO/WriteHelpers.h>
+#include <Processors/Port.h>
 #include <QueryPipeline/Chain.h>
 
 namespace DB
@@ -19,7 +20,7 @@ static void checkSingleInput(const IProcessor & transform)
             transform.getInputs().size());
 
     if (transform.getInputs().front().isConnected())
-        throw Exception("Transform for chain has connected input", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Transform for chain has connected input");
 }
 
 static void checkSingleOutput(const IProcessor & transform)
@@ -32,7 +33,7 @@ static void checkSingleOutput(const IProcessor & transform)
             transform.getOutputs().size());
 
     if (transform.getOutputs().front().isConnected())
-        throw Exception("Transform for chain has connected output", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Transform for chain has connected output");
 }
 
 static void checkTransform(const IProcessor & transform)
@@ -99,6 +100,14 @@ void Chain::addSink(ProcessorPtr processor)
     processors.emplace_back(std::move(processor));
 }
 
+void Chain::appendChain(Chain chain)
+{
+    connect(getOutputPort(), chain.getInputPort());
+    processors.splice(processors.end(), std::move(chain.processors));
+    attachResources(chain.detachResources());
+    num_threads += chain.num_threads;
+}
+
 IProcessor & Chain::getSource()
 {
     checkInitialized(processors);
@@ -121,6 +130,16 @@ OutputPort & Chain::getOutputPort() const
 {
     checkInitialized(processors);
     return processors.back()->getOutputs().front();
+}
+
+const Block & Chain::getInputHeader() const
+{
+    return getInputPort().getHeader();
+}
+
+const Block & Chain::getOutputHeader() const
+{
+    return getOutputPort().getHeader();
 }
 
 void Chain::reset()

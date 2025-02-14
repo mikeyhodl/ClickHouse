@@ -5,13 +5,19 @@
 #include <base/defines.h>
 #include <Common/ExternalModelInfo.h>
 
-#include <chrono>
 #include <mutex>
 #include <unordered_map>
+
+namespace Poco
+{
+class Logger;
+}
 
 
 namespace DB
 {
+
+using LoggerPtr = std::shared_ptr<Poco::Logger>;
 
 class CatBoostLibraryHandlerFactory final : private boost::noncopyable
 {
@@ -31,7 +37,7 @@ private:
     /// map: model path --> catboost library handler
     std::unordered_map<String, CatBoostLibraryHandlerPtr> library_handlers TSA_GUARDED_BY(mutex);
     std::mutex mutex;
-    Poco::Logger * log;
+    LoggerPtr log;
 };
 
 }

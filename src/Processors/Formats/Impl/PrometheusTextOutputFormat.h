@@ -1,9 +1,7 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
 
-#include <Core/Block.h>
 #include <Formats/FormatSettings.h>
 #include <Processors/Formats/IRowOutputFormat.h>
 #include <DataTypes/Serializations/ISerialization.h>
@@ -20,7 +18,6 @@ public:
     PrometheusTextOutputFormat(
         WriteBuffer & out_,
         const Block & header_,
-        const RowOutputFormatParams & params_,
         const FormatSettings & format_settings_);
 
     String getName() const override { return "PrometheusTextOutputFormat"; }

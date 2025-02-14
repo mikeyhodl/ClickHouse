@@ -18,11 +18,13 @@ public:
 
     PartitionedSink(const ASTPtr & partition_by, ContextPtr context_, const Block & sample_block_);
 
+    ~PartitionedSink() override;
+
     String getName() const override { return "PartitionedSink"; }
 
-    void consume(Chunk chunk) override;
+    void consume(Chunk & chunk) override;
 
-    void onException() override;
+    void onException(std::exception_ptr exception) override;
 
     void onFinish() override;
 
@@ -45,7 +47,6 @@ private:
     Arena partition_keys_arena;
 
     SinkPtr getSinkForPartitionKey(StringRef partition_key);
-
 };
 
 }

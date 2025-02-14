@@ -1,8 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <exception>
 #include <memory>
-#include <iostream>
 #include <cassert>
 #include <cstring>
 
@@ -17,6 +17,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int CANNOT_WRITE_AFTER_END_OF_BUFFER;
+    extern const int CANNOT_WRITE_AFTER_BUFFER_CANCELED;
     extern const int LOGICAL_ERROR;
 }
 
@@ -30,23 +31,44 @@ namespace ErrorCodes
 class WriteBuffer : public BufferBase
 {
 public:
+    /// Special exception to throw when the current MemoryWriteBuffer cannot receive data
+    class CurrentBufferExhausted : public std::exception
+    {
+    public:
+        const char * what() const noexcept override { return "WriteBuffer limit is exhausted"; }
+    };
+
     using BufferBase::set;
     using BufferBase::position;
-    WriteBuffer(Position ptr, size_t size) : BufferBase(ptr, size, 0) {}
     void set(Position ptr, size_t size) { BufferBase::set(ptr, size, 0); }
 
     /** write the data in the buffer (from the beginning of the buffer to the current position);
-      * set the position to the beginning; throw an exception, if something is wrong
+      * set the position to the beginning; throw an exception, if something is wrong.
+      *
+      * Next call doesn't guarantee that buffer capacity is regained after.
+      * Some buffers (i.g WriteBufferFromS3) flush its data only after certain amount of consumed data.
+      * If direct write is performed into [position(), buffer().end()) and its length is not enough,
+      * you need to fill it first (i.g with write call), after it the capacity is regained.
       */
-    inline void next()
+    void next()
     {
+        if (canceled)
+            return;
+
         if (!offset())
             return;
-        bytes += offset();
+
+        auto bytes_in_buffer = offset();
 
         try
         {
             nextImpl();
+        }
+        catch (CurrentBufferExhausted &)
+        {
+            pos = working_buffer.begin();
+            bytes += bytes_in_buffer;
+            throw;
         }
         catch (...)
         {
@@ -54,28 +76,34 @@ public:
               * so that later (for example, when the stack was expanded) there was no second attempt to write data.
               */
             pos = working_buffer.begin();
+            bytes += bytes_in_buffer;
+
+            cancel();
+
             throw;
         }
 
-        pos = working_buffer.begin();
+        bytes += bytes_in_buffer;
+        pos = working_buffer.begin() + nextimpl_working_buffer_offset;
+        nextimpl_working_buffer_offset = 0;
     }
 
-    /** it is desirable in the derived classes to place the finalize() call in the destructor,
-      * so that the last data is written (if finalize() wasn't called explicitly)
-      */
-    virtual ~WriteBuffer() = default;
+    /// Calling finalize() in the destructor of derived classes is a bad practice.
+    virtual ~WriteBuffer();
 
-    inline void nextIfAtEnd()
+    void nextIfAtEnd()
     {
         if (!hasPendingData())
             next();
     }
 
-
     void write(const char * from, size_t n)
     {
         if (finalized)
             throw Exception{ErrorCodes::LOGICAL_ERROR, "Cannot write to finalized buffer"};
+
+        if (canceled)
+            throw Exception{ErrorCodes::CANNOT_WRITE_AFTER_BUFFER_CANCELED, "Cannot write to canceled buffer"};
 
         size_t bytes_copied = 0;
 
@@ -92,11 +120,13 @@ public:
         }
     }
 
-
-    inline void write(char x)
+    void write(char x)
     {
         if (finalized)
             throw Exception{ErrorCodes::LOGICAL_ERROR, "Cannot write to finalized buffer"};
+
+        if (canceled)
+            throw Exception{ErrorCodes::LOGICAL_ERROR, "Cannot write to canceled buffer"};
 
         nextIfAtEnd();
         *pos = x;
@@ -113,25 +143,11 @@ public:
     virtual void preFinalize() { next(); }
 
     /// Write the last data.
-    void finalize()
-    {
-        if (finalized)
-            return;
+    void finalize();
+    void cancel() noexcept;
 
-        /// finalize() is often called from destructors.
-        LockMemoryExceptionInThread lock(VariableContext::Global);
-        try
-        {
-            finalizeImpl();
-            finalized = true;
-        }
-        catch (...)
-        {
-            pos = working_buffer.begin();
-            finalized = true;
-            throw;
-        }
-    }
+    bool isFinalized() const { return finalized; }
+    bool isCanceled() const { return canceled; }
 
     /// Wait for data to be reliably written. Mainly, call fsync for fd.
     /// May be called after finalize() if needed.
@@ -140,23 +156,112 @@ public:
         next();
     }
 
-protected:
-    virtual void finalizeImpl()
+    size_t rejectBufferedDataSave()
     {
-        next();
+        size_t before = count();
+        bool data_has_been_sent = count() != offset();
+        if (!data_has_been_sent)
+            position() -= offset();
+        return before - count();
     }
 
+protected:
+    WriteBuffer(Position ptr, size_t size) : BufferBase(ptr, size, 0) {}
+
+    virtual void finalizeImpl() { next(); }
+    virtual void cancelImpl() noexcept { }
+
     bool finalized = false;
+    bool canceled = false;
+
+    /// The number of bytes to preserve from the initial position of `working_buffer`
+    /// buffer. Apparently this is an additional out-parameter for nextImpl(),
+    /// not a real field.
+    size_t nextimpl_working_buffer_offset = 0;
 
 private:
     /** Write the data in the buffer (from the beginning of the buffer to the current position).
       * Throw an exception if something is wrong.
       */
-    virtual void nextImpl() { throw Exception("Cannot write after end of buffer.", ErrorCodes::CANNOT_WRITE_AFTER_END_OF_BUFFER); }
+    virtual void nextImpl()
+    {
+        throw Exception(ErrorCodes::CANNOT_WRITE_AFTER_END_OF_BUFFER, "Cannot write after end of buffer.");
+    }
+
+    bool isStackUnwinding() const
+    {
+        return exception_level < std::uncaught_exceptions();
+    }
+
+    int exception_level = std::uncaught_exceptions();
 };
 
 
 using WriteBufferPtr = std::shared_ptr<WriteBuffer>;
 
+
+class WriteBufferFromPointer : public WriteBuffer
+{
+public:
+    WriteBufferFromPointer(Position ptr, size_t size) : WriteBuffer(ptr, size) {}
+
+private:
+    void finalizeImpl() override
+    {
+        /// no op
+    }
+
+    void sync() override
+    {
+        /// no on
+    }
+};
+
+
+// AutoCanceledWriteBuffer cancel the buffer in d-tor when it has not been finalized before d-tor
+// AutoCanceledWriteBuffer could not be inherited.
+// Otherwise cancel method could not call proper cancelImpl ьуерщв because inheritor is destroyed already.
+// But the ussage of final inheritance is avoided in favor to keep the possibility to use std::make_shared.
+template<class Base>
+class AutoCanceledWriteBuffer final : public Base
+{
+    static_assert(std::derived_from<Base, WriteBuffer>);
+
+public:
+    using Base::Base;
+
+    ~AutoCanceledWriteBuffer() override
+    {
+        if (!this->finalized && !this->canceled)
+            this->cancel();
+    }
+};
+
+
+/// That class is applied only in 2 folloving cases
+// case 1 - HTTPServerResponse. The external interface HTTPResponse forces that.
+// case 2 - WriteBufferFromVector, WriteBufferFromString. It is safe to make them autofinaliziable.
+// AutoFinalizedWriteBuffer could not be inherited due to a restriction on polymorphics call in d-tor.
+template<class Base>
+class AutoFinalizedWriteBuffer final : public Base
+{
+    static_assert(std::derived_from<Base, WriteBuffer>);
+
+public:
+    using Base::Base;
+
+    ~AutoFinalizedWriteBuffer() override
+    {
+        try
+        {
+            if (!this->finalized && !this->canceled)
+                this->finalize();
+        }
+        catch (...)
+        {
+            tryLogCurrentException(__PRETTY_FUNCTION__);
+        }
+    }
+};
 
 }

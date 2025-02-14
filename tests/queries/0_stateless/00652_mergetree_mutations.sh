@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Tags: no-parallel
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -70,6 +69,21 @@ wait_for_mutation "mutations_cleaner" "mutation_4.txt"
 sleep 1
 ${CLICKHOUSE_CLIENT} --query="INSERT INTO mutations_cleaner(x) VALUES (4)"
 sleep 0.1
+
+for i in {1..10}
+do
+
+    if [ "$(${CLICKHOUSE_CLIENT} --query="SELECT count() FROM system.mutations WHERE database = '$CLICKHOUSE_DATABASE' and table = 'mutations_cleaner'")" -eq 2 ]; then
+        break
+    fi
+
+    if [[ $i -eq 100 ]]; then
+        echo "Timed out while waiting for outdated mutation record to be deleted!"
+    fi
+
+    sleep 1
+    ${CLICKHOUSE_CLIENT} --query="INSERT INTO mutations_cleaner(x) VALUES (4)"  
+done
 
 # Check that the first mutation is cleaned
 ${CLICKHOUSE_CLIENT} --query="SELECT mutation_id, command, is_done FROM system.mutations WHERE database = '$CLICKHOUSE_DATABASE' and table = 'mutations_cleaner' ORDER BY mutation_id"

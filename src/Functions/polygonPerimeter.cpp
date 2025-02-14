@@ -3,27 +3,25 @@
 
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/geometry/geometries/polygon.hpp>
 
-#include <Common/logger_useful.h>
-
-#include <Columns/ColumnArray.h>
 #include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
-#include <DataTypes/DataTypeArray.h>
-#include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesNumber.h>
 
 #include <memory>
 #include <string>
 
+
 namespace DB
 {
+
 namespace ErrorCodes
 {
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
 }
 
+namespace
+{
 
 template <typename Point>
 class FunctionPolygonPerimeter : public IFunction
@@ -58,6 +56,11 @@ public:
         return std::make_shared<DataTypeFloat64>();
     }
 
+    DataTypePtr getReturnTypeForDefaultImplementationForDynamic() const override
+    {
+        return std::make_shared<DataTypeFloat64>();
+    }
+
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return true; }
 
     ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & /*result_type*/, size_t input_rows_count) const override
@@ -72,7 +75,7 @@ public:
             using Converter = typename TypeConverter::Type;
 
             if constexpr (std::is_same_v<ColumnToPointsConverter<Point>, Converter>)
-                throw Exception(fmt::format("The argument of function {} must not be Point", getName()), ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "The argument of function {} must not be Point", getName());
             else
             {
                 auto geometries = Converter::convert(arguments[0].column->convertToFullColumnIfConst());
@@ -97,6 +100,7 @@ const char * FunctionPolygonPerimeter<CartesianPoint>::name = "polygonPerimeterC
 template <>
 const char * FunctionPolygonPerimeter<SphericalPoint>::name = "polygonPerimeterSpherical";
 
+}
 
 REGISTER_FUNCTION(PolygonPerimeter)
 {
