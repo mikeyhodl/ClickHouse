@@ -1,10 +1,10 @@
 if (SANITIZE OR NOT (
-    ((OS_LINUX OR OS_FREEBSD) AND (ARCH_AMD64 OR ARCH_AARCH64 OR ARCH_PPC64LE OR ARCH_RISCV64)) OR
+    ((OS_LINUX OR OS_FREEBSD) AND (ARCH_AMD64 OR ARCH_AARCH64 OR ARCH_PPC64LE OR ARCH_RISCV64 OR ARCH_S390X)) OR
     (OS_DARWIN AND (CMAKE_BUILD_TYPE_UC STREQUAL "RELWITHDEBINFO" OR CMAKE_BUILD_TYPE_UC STREQUAL "DEBUG"))
 ))
     if (ENABLE_JEMALLOC)
         message (${RECONFIGURE_MESSAGE_LEVEL}
-                 "jemalloc is disabled implicitly: it doesn't work with sanitizers and can only be used with x86_64, aarch64, or ppc64le Linux or FreeBSD builds and RelWithDebInfo macOS builds.")
+                 "jemalloc is disabled implicitly: it doesn't work with sanitizers and can only be used with x86_64, aarch64, or ppc64le Linux or FreeBSD builds and RelWithDebInfo macOS builds. Use -DENABLE_JEMALLOC=0")
     endif ()
     set (ENABLE_JEMALLOC OFF)
 else ()
@@ -17,28 +17,28 @@ if (NOT ENABLE_JEMALLOC)
 endif ()
 
 if (NOT OS_LINUX)
-    message (WARNING "jemalloc support on non-linux is EXPERIMENTAL")
+    message (WARNING "jemalloc support on non-Linux is EXPERIMENTAL")
 endif()
 
 if (OS_LINUX)
-    # ThreadPool select job randomly, and there can be some threads that had been
-    # performed some memory heavy task before and will be inactive for some time,
-    # but until it will became active again, the memory will not be freed since by
-    # default each thread has it's own arena, but there should be not more then
+    # ThreadPool select job randomly, and there can be some threads that have been
+    # performed some memory-heavy tasks before and will be inactive for some time,
+    # but until it becomes active again, the memory will not be freed since, by
+    # default, each thread has its arena, but there should be no more than
     # 4*CPU arenas (see opt.nareans description).
     #
-    # By enabling percpu_arena number of arenas limited to number of CPUs and hence
+    # By enabling percpu_arena number of arenas is limited to the number of CPUs, and hence
     # this problem should go away.
     #
     # muzzy_decay_ms -- use MADV_FREE when available on newer Linuxes, to
     # avoid spurious latencies and additional work associated with
     # MADV_DONTNEED. See
     # https://github.com/ClickHouse/ClickHouse/issues/11121 for motivation.
-    set (JEMALLOC_CONFIG_MALLOC_CONF "percpu_arena:percpu,oversize_threshold:0,muzzy_decay_ms:5000,dirty_decay_ms:5000")
+    set (JEMALLOC_CONFIG_MALLOC_CONF "percpu_arena:percpu,oversize_threshold:0,muzzy_decay_ms:0,dirty_decay_ms:5000,prof:true,prof_active:false,background_thread:true")
 else()
-    set (JEMALLOC_CONFIG_MALLOC_CONF "oversize_threshold:0,muzzy_decay_ms:5000,dirty_decay_ms:5000")
+    set (JEMALLOC_CONFIG_MALLOC_CONF "oversize_threshold:0,muzzy_decay_ms:0,dirty_decay_ms:5000")
 endif()
-# CACHE variable is empty, to allow changing defaults without necessity
+# CACHE variable is empty to allow changing defaults without the necessity
 # to purge cache
 set (JEMALLOC_CONFIG_MALLOC_CONF_OVERRIDE "" CACHE STRING "Change default configuration string of JEMalloc" )
 if (JEMALLOC_CONFIG_MALLOC_CONF_OVERRIDE)
@@ -148,6 +148,8 @@ elseif (ARCH_PPC64LE)
     set(JEMALLOC_INCLUDE_PREFIX "${JEMALLOC_INCLUDE_PREFIX}_ppc64le")
 elseif (ARCH_RISCV64)
     set(JEMALLOC_INCLUDE_PREFIX "${JEMALLOC_INCLUDE_PREFIX}_riscv64")
+elseif (ARCH_S390X)
+    set(JEMALLOC_INCLUDE_PREFIX "${JEMALLOC_INCLUDE_PREFIX}_s390x")
 else ()
     message (FATAL_ERROR "internal jemalloc: This arch is not supported")
 endif ()
@@ -159,27 +161,25 @@ target_include_directories(_jemalloc SYSTEM PRIVATE
 
 target_compile_definitions(_jemalloc PRIVATE -DJEMALLOC_NO_PRIVATE_NAMESPACE)
 
-if (CMAKE_BUILD_TYPE_UC STREQUAL "DEBUG")
-    target_compile_definitions(_jemalloc PRIVATE
-        -DJEMALLOC_DEBUG=1
-        # Usage examples:
-        # - MALLOC_CONF=log:.
-        # - MALLOC_CONF='log:core.malloc.exit|core.sallocx.entry|core.sdallocx.entry'
-        -DJEMALLOC_LOG=1)
-endif ()
+# Because our coverage callbacks call malloc, and recursive call of malloc could not work.
+target_compile_options(_jemalloc PRIVATE ${WITHOUT_COVERAGE_FLAGS_LIST})
 
 target_compile_definitions(_jemalloc PRIVATE -DJEMALLOC_PROF=1)
 
-if (USE_UNWIND)
-    # jemalloc provides support for two different libunwind flavors: the original HP libunwind and the one coming with gcc / g++ / libstdc++.
-    # The latter is identified by `JEMALLOC_PROF_LIBGCC` and uses `_Unwind_Backtrace` method instead of `unw_backtrace`.
-    # At the time ClickHouse uses LLVM libunwind which follows libgcc's way of backtracing.
-
-    # ClickHouse has to provide `unw_backtrace` method by the means of [commit 8e2b31e](https://github.com/ClickHouse/libunwind/commit/8e2b31e766dd502f6df74909e04a7dbdf5182eb1).
-
-    target_compile_definitions (_jemalloc PRIVATE -DJEMALLOC_PROF_LIBGCC=1)
-    target_link_libraries (_jemalloc PRIVATE unwind)
-endif ()
+# jemalloc provides support two unwind flavors:
+# - JEMALLOC_PROF_LIBUNWIND - unw_backtrace() - gnu libunwind (compatible with llvm libunwind)
+# - JEMALLOC_PROF_LIBGCC - _Unwind_Backtrace() - the original HP libunwind and the one coming with gcc / g++ / libstdc++.
+#
+# But for JEMALLOC_PROF_LIBGCC it also calls _Unwind_Backtrace() during
+# bootstraping of jemalloc, which may lead to deadlock, if the dlsym will do
+# allocations somewhere (like glibc does prio 2.34, see [1]).
+#
+#  [1]: https://sourceware.org/git/?p=glibc.git;a=commit;h=fada9018199c21c469ff0e731ef75c6020074ac9
+#
+# And since ClickHouse unwind already supports unw_backtrace() we can safely
+# switch to it to avoid this deadlock.
+target_compile_definitions (_jemalloc PRIVATE -DJEMALLOC_PROF_LIBUNWIND=1)
+target_link_libraries (_jemalloc PRIVATE unwind)
 
 # for RTLD_NEXT
 target_compile_options(_jemalloc PRIVATE -D_GNU_SOURCE)

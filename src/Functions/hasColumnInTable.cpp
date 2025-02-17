@@ -1,3 +1,4 @@
+#include <Core/Settings.h>
 #include <Functions/IFunction.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionHelpers.h>
@@ -7,6 +8,7 @@
 #include <Storages/IStorage.h>
 #include <Interpreters/Cluster.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Storages/getStructureOfRemoteTable.h>
 
 
@@ -65,8 +67,7 @@ public:
 DataTypePtr FunctionHasColumnInTable::getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const
 {
     if (arguments.size() < 3 || arguments.size() > 6)
-        throw Exception{"Invalid number of arguments for function " + getName(),
-            ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH};
+        throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Invalid number of arguments for function {}", getName());
 
     static const std::string arg_pos_description[] = {"First", "Second", "Third", "Fourth", "Fifth", "Sixth"};
     for (size_t i = 0; i < arguments.size(); ++i)
@@ -75,8 +76,8 @@ DataTypePtr FunctionHasColumnInTable::getReturnTypeImpl(const ColumnsWithTypeAnd
 
         if (!checkColumnConst<ColumnString>(argument.column.get()))
         {
-            throw Exception(arg_pos_description[i] + " argument for function " + getName() + " must be const String.",
-                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "{} argument for function {} must be const String.",
+                            arg_pos_description[i], getName());
         }
     }
 
@@ -88,8 +89,8 @@ ColumnPtr FunctionHasColumnInTable::executeImpl(const ColumnsWithTypeAndName & a
 {
     auto get_string_from_columns = [&](const ColumnWithTypeAndName & column) -> String
     {
-        const ColumnConst * const_column = checkAndGetColumnConst<ColumnString>(column.column.get());
-        return const_column->getValue<String>();
+        const ColumnConst & const_column = checkAndGetColumnConst<ColumnString>(*column.column);
+        return const_column.getValue<String>();
     };
 
     size_t arg = 0;
@@ -111,9 +112,10 @@ ColumnPtr FunctionHasColumnInTable::executeImpl(const ColumnsWithTypeAndName & a
     String column_name = get_string_from_columns(arguments[arg++]);
 
     if (table_name.empty())
-        throw Exception("Table name is empty", ErrorCodes::UNKNOWN_TABLE);
+        throw Exception(ErrorCodes::UNKNOWN_TABLE, "Table name is empty");
 
     bool has_column;
+    bool has_alias_column;
     if (host_name.empty())
     {
         // FIXME this (probably) needs a non-constant access to query context,
@@ -124,6 +126,7 @@ ColumnPtr FunctionHasColumnInTable::executeImpl(const ColumnsWithTypeAndName & a
             const_pointer_cast<Context>(getContext()));
         auto table_metadata = table->getInMemoryMetadataPtr();
         has_column = table_metadata->getColumns().hasPhysical(column_name);
+        has_alias_column = table_metadata->getColumns().hasAlias(column_name);
     }
     else
     {
@@ -131,14 +134,18 @@ ColumnPtr FunctionHasColumnInTable::executeImpl(const ColumnsWithTypeAndName & a
 
         bool treat_local_as_remote = false;
         bool treat_local_port_as_remote = getContext()->getApplicationType() == Context::ApplicationType::LOCAL;
-        auto cluster = std::make_shared<Cluster>(
-            getContext()->getSettings(),
-            host_names,
+        ClusterConnectionParameters params{
             !user_name.empty() ? user_name : "default",
             password,
             getContext()->getTCPPort(),
             treat_local_as_remote,
-            treat_local_port_as_remote);
+            treat_local_port_as_remote,
+            /* secure= */ false,
+            /* priority= */ Priority{1},
+            /* cluster_name= */ "",
+            /* password= */ ""
+        };
+        auto cluster = std::make_shared<Cluster>(getContext()->getSettingsRef(), host_names, params);
 
         // FIXME this (probably) needs a non-constant access to query context,
         // because it might initialized a storage. Ideally, the tables required
@@ -148,9 +155,10 @@ ColumnPtr FunctionHasColumnInTable::executeImpl(const ColumnsWithTypeAndName & a
             const_pointer_cast<Context>(getContext()));
 
         has_column = remote_columns.hasPhysical(column_name);
+        has_alias_column = remote_columns.hasAlias(column_name);
     }
 
-    return DataTypeUInt8().createColumnConst(input_rows_count, Field{static_cast<UInt64>(has_column)});
+    return DataTypeUInt8().createColumnConst(input_rows_count, Field{static_cast<UInt64>(has_column || has_alias_column)});
 }
 
 }

@@ -15,6 +15,7 @@ namespace ErrorCodes
 {
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
     extern const int ILLEGAL_COLUMN;
+    extern const int TOO_FEW_ARGUMENTS_FOR_FUNCTION;
 }
 
 class FunctionChar : public IFunction
@@ -36,17 +37,23 @@ public:
     DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
     {
         if (arguments.empty())
-            throw Exception("Number of arguments for function " + getName() + " can't be " + toString(arguments.size())
-                            + ", should be at least 1", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::TOO_FEW_ARGUMENTS_FOR_FUNCTION,
+                            "Number of arguments for function {} can't be {}, should be at least 1",
+                            getName(), arguments.size());
 
         for (const auto & arg : arguments)
         {
             WhichDataType which(arg);
             if (!(which.isInt() || which.isUInt() || which.isFloat()))
-                throw Exception("Illegal type " + arg->getName() + " of argument of function " + getName()
-                                + ", must be Int, UInt or Float number",
-                                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
+                                "Illegal type {} of argument of function {}, must be Int, UInt or Float number",
+                                arg->getName(), getName());
         }
+        return std::make_shared<DataTypeString>();
+    }
+
+    DataTypePtr getReturnTypeForDefaultImplementationForDynamic() const override
+    {
         return std::make_shared<DataTypeString>();
     }
 
@@ -86,8 +93,8 @@ public:
                   || executeNumber<Float32>(*column, out_vec, idx, input_rows_count, size_per_row)
                   || executeNumber<Float64>(*column, out_vec, idx, input_rows_count, size_per_row)))
             {
-                throw Exception{"Illegal column " + arguments[idx].column->getName()
-                                + " of first argument of function " + getName(), ErrorCodes::ILLEGAL_COLUMN};
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Illegal column {} of first argument of function {}",
+                                arguments[idx].column->getName(), getName());
             }
         }
 
@@ -101,21 +108,18 @@ private:
         const ColumnVector<T> * src_data_concrete = checkAndGetColumn<ColumnVector<T>>(&src_data);
 
         if (!src_data_concrete)
-        {
             return false;
-        }
 
         for (size_t row = 0; row < rows; ++row)
-        {
             out_vec[row * size_per_row + column_idx] = static_cast<char>(src_data_concrete->getInt(row));
-        }
+
         return true;
     }
 };
 
 REGISTER_FUNCTION(Char)
 {
-    factory.registerFunction<FunctionChar>({}, FunctionFactory::CaseInsensitive);
+    factory.registerFunction<FunctionChar>({}, FunctionFactory::Case::Insensitive);
 }
 
 }

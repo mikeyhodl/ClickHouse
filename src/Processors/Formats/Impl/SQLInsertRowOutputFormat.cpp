@@ -1,12 +1,15 @@
-#include <Processors/Formats/Impl/SQLInsertRowOutputFormat.h>
+#include <DataTypes/Serializations/ISerialization.h>
+#include <Formats/FormatFactory.h>
 #include <IO/WriteHelpers.h>
+#include <Processors/Formats/Impl/SQLInsertRowOutputFormat.h>
+#include <Processors/Port.h>
 
 
 namespace DB
 {
 
-SQLInsertRowOutputFormat::SQLInsertRowOutputFormat(WriteBuffer & out_, const Block & header_, const RowOutputFormatParams & params_, const FormatSettings & format_settings_)
-    : IRowOutputFormat(header_, out_, params_), column_names(header_.getNames()), format_settings(format_settings_)
+SQLInsertRowOutputFormat::SQLInsertRowOutputFormat(WriteBuffer & out_, const Block & header_, const FormatSettings & format_settings_)
+    : IRowOutputFormat(header_, out_), column_names(header_.getNames()), format_settings(format_settings_)
 {
 }
 
@@ -85,16 +88,19 @@ void SQLInsertRowOutputFormat::writeSuffix()
     writeCString(";\n", out);
 }
 
+void SQLInsertRowOutputFormat::resetFormatterImpl()
+{
+    rows_in_line = 0;
+}
 
 void registerOutputFormatSQLInsert(FormatFactory & factory)
 {
     factory.registerOutputFormat("SQLInsert", [](
         WriteBuffer & buf,
         const Block & sample,
-        const RowOutputFormatParams & params,
         const FormatSettings & settings)
     {
-        return std::make_shared<SQLInsertRowOutputFormat>(buf, sample, params, settings);
+        return std::make_shared<SQLInsertRowOutputFormat>(buf, sample, settings);
     });
 }
 

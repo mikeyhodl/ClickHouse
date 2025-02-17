@@ -1,6 +1,11 @@
 #include "CatBoostLibraryHandler.h"
 
+#include <Columns/ColumnFixedString.h>
+#include <Columns/ColumnString.h>
 #include <Columns/ColumnTuple.h>
+#include <Columns/ColumnVector.h>
+#include <Columns/ColumnsNumber.h>
+#include <Columns/IColumn.h>
 #include <Common/FieldVisitorConvertToNumber.h>
 
 namespace DB
@@ -169,7 +174,7 @@ std::vector<PODArray<char>> placeStringColumns(const ColumnRawPtrs & columns, si
         else if (const auto * column_fixed_string = typeid_cast<const ColumnFixedString *>(column))
             data.push_back(placeFixedStringColumn(*column_fixed_string, buffer + i, size));
         else
-            throw Exception("Cannot place string column.", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot place string column.");
     }
 
     return data;
@@ -239,11 +244,8 @@ void calcHashes(const ColumnRawPtrs & columns, size_t offset, size_t size, const
 ///  * CalcModelPredictionFlat if no cat features
 ///  * CalcModelPrediction if all cat features are strings
 ///  * CalcModelPredictionWithHashedCatFeatures if has int cat features.
-ColumnFloat64::MutablePtr CatBoostLibraryHandler::evalImpl(
-    const ColumnRawPtrs & columns,
-    bool cat_features_are_strings) const
+MutableColumnPtr CatBoostLibraryHandler::evalImpl(const ColumnRawPtrs & columns, bool cat_features_are_strings) const
 {
-    std::string error_msg = "Error occurred while applying CatBoost model: ";
     size_t column_size = columns.front()->size();
 
     auto result = ColumnFloat64::create(column_size * tree_count);
@@ -265,7 +267,8 @@ ColumnFloat64::MutablePtr CatBoostLibraryHandler::evalImpl(
                                           result_buf, column_size * tree_count))
         {
 
-            throw Exception(error_msg + api.GetErrorString(), ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL);
+            throw Exception(ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL,
+                        "Error occurred while applying CatBoost model: {}", api.GetErrorString());
         }
         return result;
     }
@@ -288,7 +291,8 @@ ColumnFloat64::MutablePtr CatBoostLibraryHandler::evalImpl(
                                       cat_features_buf, cat_features_count,
                                       result_buf, column_size * tree_count))
         {
-            throw Exception(error_msg + api.GetErrorString(), ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL);
+            throw Exception(ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL,
+                            "Error occurred while applying CatBoost model: {}", api.GetErrorString());
         }
     }
     else
@@ -304,7 +308,8 @@ ColumnFloat64::MutablePtr CatBoostLibraryHandler::evalImpl(
                 cat_features_buf, cat_features_count,
                 result_buf, column_size * tree_count))
         {
-            throw Exception(error_msg + api.GetErrorString(), ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL);
+            throw Exception(ErrorCodes::CANNOT_APPLY_CATBOOST_MODEL,
+                            "Error occurred while applying CatBoost model: {}", api.GetErrorString());
         }
     }
 
@@ -359,8 +364,10 @@ ColumnPtr CatBoostLibraryHandler::evaluate(const ColumnRawPtrs & columns) const
     if (tree_count == 1)
         return result;
 
+    auto * column = typeid_cast<ColumnFloat64 *>(result.get());
+
     size_t column_size = columns.front()->size();
-    auto * result_buf = result->getData().data();
+    auto * result_buf = column->getData().data();
 
     /// Multiple trees case. Copy data to several columns.
     MutableColumns mutable_columns(tree_count);

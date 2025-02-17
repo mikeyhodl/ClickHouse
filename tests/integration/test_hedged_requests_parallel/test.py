@@ -172,6 +172,9 @@ def update_configs(
 
 
 def test_send_table_status_sleep(started_cluster):
+    if NODES["node"].is_built_with_thread_sanitizer():
+        pytest.skip("Hedged requests don't work under Thread Sanitizer")
+
     update_configs(
         node_1_sleep_in_send_tables_status=sleep_time,
         node_2_sleep_in_send_tables_status=sleep_time,
@@ -181,6 +184,9 @@ def test_send_table_status_sleep(started_cluster):
 
 
 def test_send_data(started_cluster):
+    if NODES["node"].is_built_with_thread_sanitizer():
+        pytest.skip("Hedged requests don't work under Thread Sanitizer")
+
     update_configs(
         node_1_sleep_in_send_data=sleep_time, node_2_sleep_in_send_data=sleep_time
     )
@@ -189,6 +195,9 @@ def test_send_data(started_cluster):
 
 
 def test_combination1(started_cluster):
+    if NODES["node"].is_built_with_thread_sanitizer():
+        pytest.skip("Hedged requests don't work under Thread Sanitizer")
+
     update_configs(
         node_1_sleep_in_send_tables_status=1000,
         node_2_sleep_in_send_tables_status=1000,
@@ -199,6 +208,9 @@ def test_combination1(started_cluster):
 
 
 def test_combination2(started_cluster):
+    if NODES["node"].is_built_with_thread_sanitizer():
+        pytest.skip("Hedged requests don't work under Thread Sanitizer")
+
     update_configs(
         node_1_sleep_in_send_data=sleep_time,
         node_2_sleep_in_send_tables_status=1000,
@@ -206,10 +218,13 @@ def test_combination2(started_cluster):
         node_4_sleep_in_send_tables_status=1000,
     )
     check_query()
-    check_changing_replica_events(4)
+    check_changing_replica_events(3)
 
 
 def test_query_with_no_data_to_sample(started_cluster):
+    if NODES["node"].is_built_with_thread_sanitizer():
+        pytest.skip("Hedged requests don't work under Thread Sanitizer")
+
     update_configs(
         node_1_sleep_in_send_data=sleep_time, node_2_sleep_in_send_data=sleep_time
     )

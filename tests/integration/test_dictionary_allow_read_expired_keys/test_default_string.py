@@ -4,6 +4,7 @@ import string
 import time
 
 import pytest
+
 from helpers.cluster import ClickHouseCluster
 from helpers.test_tools import TSV
 
@@ -53,7 +54,6 @@ def started_cluster():
         cluster.shutdown()
 
 
-# @pytest.mark.skip(reason="debugging")
 def test_return_real_values(started_cluster):
     assert None != dictionary_node.get_process_pid(
         "clickhouse"

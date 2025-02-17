@@ -1,6 +1,6 @@
-from bottle import request, route, run, response
 from threading import Lock
 
+from bottle import request, response, route, run
 
 # Endpoint can be configured to throw 500 error on N-th request attempt.
 # In usual situation just redirects to original Minio server.
@@ -42,7 +42,6 @@ def delete(_bucket):
 
 @route("/<_bucket>/<_path:path>", ["GET", "POST", "PUT", "DELETE"])
 def server(_bucket, _path):
-
     # It's delete query for failed part
     if _path.endswith("delete"):
         response.set_header("Location", "http://minio1:9001/" + _bucket + "/" + _path)

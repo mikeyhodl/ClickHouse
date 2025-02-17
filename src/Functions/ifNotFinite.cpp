@@ -2,7 +2,6 @@
 #include <Functions/FunctionHelpers.h>
 #include <Functions/FunctionFactory.h>
 #include <DataTypes/DataTypesNumber.h>
-#include <DataTypes/getLeastSupertype.h>
 #include <Core/ColumnNumbers.h>
 
 
@@ -46,7 +45,7 @@ public:
     {
         ColumnsWithTypeAndName is_finite_columns{arguments[0]};
         auto is_finite = FunctionFactory::instance().get("isFinite", context)->build(is_finite_columns);
-        auto res = is_finite->execute(is_finite_columns, is_finite->getResultType(), input_rows_count);
+        auto res = is_finite->execute(is_finite_columns, is_finite->getResultType(), input_rows_count, /* dry_run = */ false);
 
         ColumnsWithTypeAndName if_columns
         {
@@ -56,7 +55,7 @@ public:
         };
 
         auto func_if = FunctionFactory::instance().get("if", context)->build(if_columns);
-        return func_if->execute(if_columns, result_type, input_rows_count);
+        return func_if->execute(if_columns, result_type, input_rows_count, /* dry_run = */ false);
     }
 
 private:

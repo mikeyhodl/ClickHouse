@@ -23,7 +23,7 @@ class ASTWatchQuery : public ASTQueryWithTableAndOutput
 
 public:
     ASTPtr limit_length;
-    bool is_watch_events;
+    bool is_watch_events = false;
 
     ASTWatchQuery() = default;
     String getID(char) const override { return "WatchQuery_" + getDatabase() + "_" + getTable(); }
@@ -37,23 +37,33 @@ public:
         return res;
     }
 
-protected:
-    void formatQueryImpl(const FormatSettings & s, FormatState & state, FormatStateStacked frame) const override
-    {
-        std::string indent_str = s.one_line ? "" : std::string(4 * frame.indent, ' ');
+    QueryKind getQueryKind() const override { return QueryKind::Create; }
 
-        s.ostr << (s.hilite ? hilite_keyword : "") << "WATCH " << (s.hilite ? hilite_none : "")
-            << (database ? backQuoteIfNeed(getDatabase()) + "." : "") << backQuoteIfNeed(getTable());
+protected:
+    void formatQueryImpl(WriteBuffer & ostr, const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override
+    {
+        std::string indent_str = settings.one_line ? "" : std::string(4 * frame.indent, ' ');
+
+        ostr << (settings.hilite ? hilite_keyword : "") << "WATCH " << (settings.hilite ? hilite_none : "");
+
+        if (database)
+        {
+            database->format(ostr, settings, state, frame);
+            ostr << '.';
+        }
+
+        chassert(table);
+        table->format(ostr, settings, state, frame);
 
         if (is_watch_events)
         {
-            s.ostr << " " << (s.hilite ? hilite_keyword : "") << "EVENTS" << (s.hilite ? hilite_none : "");
+            ostr << " " << (settings.hilite ? hilite_keyword : "") << "EVENTS" << (settings.hilite ? hilite_none : "");
         }
 
         if (limit_length)
         {
-            s.ostr << (s.hilite ? hilite_keyword : "") << s.nl_or_ws << indent_str << "LIMIT " << (s.hilite ? hilite_none : "");
-            limit_length->formatImpl(s, state, frame);
+            ostr << (settings.hilite ? hilite_keyword : "") << settings.nl_or_ws << indent_str << "LIMIT " << (settings.hilite ? hilite_none : "");
+            limit_length->format(ostr, settings, state, frame);
         }
     }
 };

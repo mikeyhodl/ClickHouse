@@ -45,7 +45,8 @@ static void limitProgressingSpeed(size_t total_progress_size, size_t max_speed_i
 
 void ExecutionSpeedLimits::throttle(
     size_t read_rows, size_t read_bytes,
-    size_t total_rows_to_read, UInt64 total_elapsed_microseconds) const
+    size_t total_rows_to_read, UInt64 total_elapsed_microseconds,
+    OverflowMode timeout_overflow_mode) const
 {
     if ((min_execution_rps != 0 || max_execution_rps != 0
          || min_execution_bps != 0 || max_execution_bps != 0
@@ -77,18 +78,20 @@ void ExecutionSpeedLimits::throttle(
                     read_bytes / elapsed_seconds,
                     min_execution_bps);
 
-            /// If the predicted execution time is longer than `max_execution_time`.
-            if (max_execution_time != 0 && total_rows_to_read && read_rows)
+            /// If the predicted execution time is longer than `max_estimated_execution_time`.
+            if (max_estimated_execution_time != 0 && total_rows_to_read && read_rows)
             {
                 double estimated_execution_time_seconds = elapsed_seconds * (static_cast<double>(total_rows_to_read) / read_rows);
 
-                if (estimated_execution_time_seconds > max_execution_time.totalSeconds())
+                if (timeout_overflow_mode == OverflowMode::THROW && estimated_execution_time_seconds > max_estimated_execution_time.totalSeconds())
                     throw Exception(
                         ErrorCodes::TOO_SLOW,
-                        "Estimated query execution time ({} seconds) is too long. Maximum: {}. Estimated rows to process: {}",
+                        "Estimated query execution time ({:.5f} seconds) is too long. Maximum: {}. Estimated rows to process: {} ({} read in {:.5f} seconds).",
                         estimated_execution_time_seconds,
-                        max_execution_time.totalSeconds(),
-                        total_rows_to_read);
+                        max_estimated_execution_time.totalSeconds(),
+                        total_rows_to_read,
+                        read_rows,
+                        elapsed_seconds);
             }
 
             if (max_execution_rps && rows_per_second >= max_execution_rps)
@@ -101,7 +104,7 @@ void ExecutionSpeedLimits::throttle(
 }
 
 template <typename... Args>
-static bool handleOverflowMode(OverflowMode mode, int code, fmt::format_string<Args...> fmt, Args &&... args)
+static bool handleOverflowMode(OverflowMode mode, int code, FormatStringHelper<Args...> fmt, Args &&... args)
 {
     switch (mode)
     {
@@ -112,23 +115,21 @@ static bool handleOverflowMode(OverflowMode mode, int code, fmt::format_string<A
             ProfileEvents::increment(ProfileEvents::OverflowBreak);
             return false;
         default:
-            throw Exception("Logical error: unknown overflow mode", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown overflow mode");
     }
 }
 
-bool ExecutionSpeedLimits::checkTimeLimit(const Stopwatch & stopwatch, OverflowMode overflow_mode) const
+bool ExecutionSpeedLimits::checkTimeLimit(const UInt64 & elapsed_ns, OverflowMode overflow_mode) const
 {
     if (max_execution_time != 0)
     {
-        auto elapsed_ns = stopwatch.elapsed();
-
         if (elapsed_ns > static_cast<UInt64>(max_execution_time.totalMicroseconds()) * 1000)
             return handleOverflowMode(
                 overflow_mode,
                 ErrorCodes::TIMEOUT_EXCEEDED,
-                "Timeout exceeded: elapsed {} seconds, maximum: {}",
-                static_cast<double>(elapsed_ns) / 1000000000ULL,
-                max_execution_time.totalMicroseconds() / 1000000.0);
+                "Timeout exceeded: elapsed {} ms, maximum: {} ms",
+                static_cast<double>(elapsed_ns) / 1000000ULL,
+                max_execution_time.totalMilliseconds());
     }
 
     return true;

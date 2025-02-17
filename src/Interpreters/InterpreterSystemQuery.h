@@ -2,6 +2,7 @@
 
 #include <Interpreters/IInterpreter.h>
 #include <Parsers/IAST_fwd.h>
+#include <Parsers/SyncReplicaMode.h>
 #include <Storages/IStorage_fwd.h>
 #include <Interpreters/StorageID.h>
 #include <Common/ActionLock.h>
@@ -17,8 +18,10 @@ class Context;
 class AccessRightsElements;
 class ASTSystemQuery;
 class IDatabase;
-
 using DatabasePtr = std::shared_ptr<IDatabase>;
+class RefreshTask;
+using RefreshTaskPtr = std::shared_ptr<RefreshTask>;
+using RefreshTaskList = std::list<RefreshTaskPtr>;
 
 
 /** Implement various SYSTEM queries.
@@ -42,21 +45,29 @@ public:
 
     static void startStopActionInDatabase(StorageActionBlockType action_type, bool start,
                                           const String & database_name, const DatabasePtr & database,
-                                          const ContextPtr & local_context, Poco::Logger * log);
+                                          const ContextPtr & local_context, LoggerPtr log);
+
+    static bool trySyncReplica(StoragePtr table, SyncReplicaMode sync_replica_mode, const std::unordered_set<String> & src_replicas, ContextPtr context_);
 
 private:
     ASTPtr query_ptr;
-    Poco::Logger * log = nullptr;
+    LoggerPtr log = nullptr;
     StorageID table_id = StorageID::createEmpty();      /// Will be set up if query contains table name
     VolumePtr volume_ptr;
 
     /// Tries to get a replicated table and restart it
     /// Returns pointer to a newly created table if the restart was successful
-    StoragePtr tryRestartReplica(const StorageID & replica, ContextMutablePtr context, bool need_ddl_guard = true);
+    StoragePtr tryRestartReplica(const StorageID & replica, ContextMutablePtr context);
 
     void restartReplica(const StorageID & replica, ContextMutablePtr system_context);
     void restartReplicas(ContextMutablePtr system_context);
     void syncReplica(ASTSystemQuery & query);
+    void setReplicaReadiness(bool ready);
+    void waitLoadingParts();
+
+    void loadPrimaryKeys();
+    void unloadPrimaryKeys();
+    void loadOrUnloadPrimaryKeysImpl(bool load);
 
     void syncReplicatedDatabase(ASTSystemQuery & query);
 
@@ -66,13 +77,20 @@ private:
 
     void dropReplica(ASTSystemQuery & query);
     bool dropReplicaImpl(ASTSystemQuery & query, const StoragePtr & table);
+    void dropDatabaseReplica(ASTSystemQuery & query);
     void flushDistributed(ASTSystemQuery & query);
-    void restartDisk(String & name);
+    [[noreturn]] void restartDisk(String & name);
+
+    RefreshTaskList getRefreshTasks();
 
     AccessRightsElements getRequiredAccessForDDLOnCluster() const;
     void startStopAction(StorageActionBlockType action_type, bool start);
 
-    void extendQueryLogElemImpl(QueryLogElement &, const ASTPtr &, ContextPtr) const override;
+    void prewarmMarkCache();
+    void prewarmPrimaryIndexCache();
+
+    void stopReplicatedDDLQueries();
+    void startReplicatedDDLQueries();
 };
 
 

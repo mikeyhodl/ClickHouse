@@ -84,7 +84,8 @@ bool sliceHasImplAnyAllImplInt64(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr Int64 full = -1, none = 0;
+    static constexpr Int64 full = -1;
+    static constexpr Int64 none = 0;
     const __m256i ones = _mm256_set1_epi64x(full);
     const __m256i zeros = _mm256_setzero_si256();
 
@@ -174,7 +175,8 @@ bool sliceHasImplAnyAllImplInt32(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr int full = -1, none = 0;
+    static constexpr int full = -1;
+    static constexpr int none = 0;
 
     const __m256i ones = _mm256_set1_epi32(full);
     const __m256i zeros = _mm256_setzero_si256();
@@ -287,7 +289,8 @@ bool sliceHasImplAnyAllImplInt16(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr int16_t full = -1, none = 0;
+    static constexpr int16_t full = -1;
+    static constexpr int16_t none = 0;
     const __m256i ones = _mm256_set1_epi16(full);
     const __m256i zeros = _mm256_setzero_si256();
     if (second.size > 15 && first.size > 15)
@@ -375,14 +378,14 @@ bool sliceHasImplAnyAllImplInt16(
                                     _mm256_or_si256(
                                         _mm256_andnot_si256(
                                             _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_nm_mask, first_nm_mask, 1), _mm256_set_epi8(7,6,5,4,3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8)),
-                                            _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data ,first_data, 1), _mm256_set_epi8(7,6,5,4,3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8)))),
+                                            _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data, first_data, 1), _mm256_set_epi8(7,6,5,4,3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8)))),
                                         _mm256_andnot_si256(
                                             _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_nm_mask, first_nm_mask, 1), _mm256_set_epi8(5,4,3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6)),
                                             _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data, first_data, 1), _mm256_set_epi8(5,4,3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6))))),
                                     _mm256_or_si256(
                                         _mm256_andnot_si256(
                                             _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_nm_mask, first_nm_mask, 1), _mm256_set_epi8(3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4)),
-                                            _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data ,first_data ,1), _mm256_set_epi8(3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4)))),
+                                            _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data, first_data, 1), _mm256_set_epi8(3,2,1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4)))),
                                         _mm256_andnot_si256(
                                             _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_nm_mask, first_nm_mask, 1), _mm256_set_epi8(1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2)),
                                             _mm256_cmpeq_epi16(second_data, _mm256_shuffle_epi8(_mm256_permute2x128_si256(first_data, first_data, 1), _mm256_set_epi8(1,0,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2))))))
@@ -436,7 +439,8 @@ inline ALWAYS_INLINE bool sliceHasImplAnyAllImplInt64(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr Int64 full = -1, none = 0;
+    static constexpr Int64 full = -1;
+    static constexpr Int64 none = 0;
     const __m128i zeros = _mm_setzero_si128();
     if (second.size > 1 && first.size > 1)
     {
@@ -512,7 +516,8 @@ inline ALWAYS_INLINE bool sliceHasImplAnyAllImplInt32(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr int full = -1, none = 0;
+    static constexpr int full = -1;
+    static constexpr int none = 0;
     const __m128i zeros = _mm_setzero_si128();
     if (second.size > 3 && first.size > 3)
     {
@@ -597,7 +602,8 @@ inline ALWAYS_INLINE bool sliceHasImplAnyAllImplInt16(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr int16_t full = -1, none = 0;
+    static constexpr int16_t full = -1;
+    static constexpr int16_t none = 0;
     const __m128i zeros = _mm_setzero_si128();
     if (second.size > 6 && first.size > 6)
     {
@@ -699,7 +705,8 @@ inline ALWAYS_INLINE bool sliceHasImplAnyAllImplInt8(
 
     size_t j = 0;
     int has_mask = 1;
-    static constexpr int8_t full = -1, none = 0;
+    static constexpr int8_t full = -1;
+    static constexpr int8_t none = 0;
     const __m128i zeros = _mm_setzero_si128();
 
     if (second.size > 15 && first.size > 15)

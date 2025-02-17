@@ -40,8 +40,9 @@ public:
     {
         const DataTypeArray * array_type = checkAndGetDataType<DataTypeArray>(arguments[0].get());
         if (!array_type)
-            throw Exception("First argument for function " + getName() + " must be an array but it has type "
-                + arguments[0]->getName() + ".", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
+                            "First argument for function {} must be an array but it has type {}.",
+                            getName(), arguments[0]->getName());
 
         return std::make_shared<DataTypeArray>(std::make_shared<DataTypeUInt32>());
     }
@@ -66,12 +67,9 @@ public:
 
             return ColumnArray::create(std::move(res_nested), array->getOffsetsPtr());
         }
-        else
-        {
-            throw Exception("Illegal column " + arguments[0].column->getName()
-                    + " of first argument of function " + getName(),
-                ErrorCodes::ILLEGAL_COLUMN);
-        }
+
+        throw Exception(
+            ErrorCodes::ILLEGAL_COLUMN, "Illegal column {} of first argument of function {}", arguments[0].column->getName(), getName());
     }
 };
 

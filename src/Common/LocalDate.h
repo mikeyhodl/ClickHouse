@@ -1,15 +1,16 @@
 #pragma once
 
 #include <cstring>
-#include <string>
 #include <exception>
+#include <string>
 #include <Common/DateLUT.h>
+#include <Common/DateLUTImpl.h>
 
 
 /** Stores a calendar date in broken-down form (year, month, day-in-month).
   * Could be initialized from date in text form, like '2011-01-01' or from time_t with rounding to date.
   * Also could be initialized from date in text form like '20110101... (only first 8 symbols are used).
-  * Could be implicitly casted to time_t.
+  * Could be implicitly cast to time_t.
   * NOTE: Transforming between time_t and LocalDate is done in local time zone!
   *
   * When local time was shifted backwards (due to daylight saving time or whatever reason)
@@ -24,9 +25,8 @@ private:
     unsigned char m_month;
     unsigned char m_day;
 
-    void init(time_t time)
+    void init(time_t time, const DateLUTImpl & date_lut)
     {
-        const auto & date_lut = DateLUT::instance();
         const auto & values = date_lut.getValues(time);
 
         m_year = values.year;
@@ -56,22 +56,22 @@ private:
     }
 
 public:
-    explicit LocalDate(time_t time)
+    explicit LocalDate(time_t time, const DateLUTImpl & time_zone = DateLUT::instance())
     {
-        init(time);
+        init(time, time_zone);
     }
 
-    LocalDate(DayNum day_num) /// NOLINT
+    LocalDate(DayNum day_num, const DateLUTImpl & time_zone = DateLUT::instance()) /// NOLINT
     {
-        const auto & values = DateLUT::instance().getValues(day_num);
+        const auto & values = time_zone.getValues(day_num);
         m_year  = values.year;
         m_month = values.month;
         m_day   = values.day_of_month;
     }
 
-    explicit LocalDate(ExtendedDayNum day_num)
+    explicit LocalDate(ExtendedDayNum day_num, const DateLUTImpl & time_zone = DateLUT::instance())
     {
-        const auto & values = DateLUT::instance().getValues(day_num);
+        const auto & values = time_zone.getValues(day_num);
         m_year  = values.year;
         m_month = values.month;
         m_day   = values.day_of_month;
@@ -99,15 +99,13 @@ public:
     LocalDate(const LocalDate &) noexcept = default;
     LocalDate & operator= (const LocalDate &) noexcept = default;
 
-    DayNum getDayNum() const
+    DayNum getDayNum(const DateLUTImpl & lut = DateLUT::instance()) const
     {
-        const auto & lut = DateLUT::instance();
         return DayNum(lut.makeDayNum(m_year, m_month, m_day).toUnderType());
     }
 
-    ExtendedDayNum  getExtenedDayNum() const
+    ExtendedDayNum getExtenedDayNum(const DateLUTImpl & lut = DateLUT::instance()) const
     {
-        const auto & lut = DateLUT::instance();
         return ExtendedDayNum (lut.makeDayNum(m_year, m_month, m_day).toUnderType());
     }
 
