@@ -5,6 +5,9 @@
 #include <Parsers/CommonParsers.h>
 #include <Parsers/ParserSetQuery.h>
 #include <Parsers/ExpressionElementParsers.h>
+#include <Parsers/ExpressionListParsers.h>
+#include <Parsers/ASTFunction.h>
+#include <Parsers/FieldFromAST.h>
 
 #include <Core/Names.h>
 #include <IO/ReadBufferFromString.h>
@@ -192,11 +195,14 @@ bool parseParameterValueIntoString(IParser::Pos & pos, String & value, Expected 
 bool ParserSetQuery::parseNameValuePair(SettingChange & change, IParser::Pos & pos, Expected & expected)
 {
     ParserCompoundIdentifier name_p;
-    ParserLiteralOrMap value_p;
+    ParserLiteralOrMap literal_or_map_p;
     ParserToken s_eq(TokenType::Equals);
+    ParserSetQuery set_p(true);
+    ParserFunction function_p;
 
     ASTPtr name;
     ASTPtr value;
+    ASTPtr function_ast;
 
     if (!name_p.parse(pos, name, expected))
         return false;
@@ -204,11 +210,15 @@ bool ParserSetQuery::parseNameValuePair(SettingChange & change, IParser::Pos & p
     if (!s_eq.ignore(pos, expected))
         return false;
 
-    if (ParserKeyword("TRUE").ignore(pos, expected))
-        value = std::make_shared<ASTLiteral>(Field(static_cast<UInt64>(1)));
-    else if (ParserKeyword("FALSE").ignore(pos, expected))
-        value = std::make_shared<ASTLiteral>(Field(static_cast<UInt64>(0)));
-    else if (!value_p.parse(pos, value, expected))
+    /// for SETTINGS disk=disk(type='s3', path='', ...)
+    if (function_p.parse(pos, function_ast, expected) && function_ast->as<ASTFunction>()->name == "disk")
+    {
+        tryGetIdentifierNameInto(name, change.name);
+        change.value = createFieldFromAST(function_ast);
+
+        return true;
+    }
+    if (!literal_or_map_p.parse(pos, value, expected))
         return false;
 
     tryGetIdentifierNameInto(name, change.name);
@@ -223,9 +233,11 @@ bool ParserSetQuery::parseNameValuePairWithParameterOrDefault(
     ParserCompoundIdentifier name_p;
     ParserLiteralOrMap value_p;
     ParserToken s_eq(TokenType::Equals);
+    ParserFunction function_p;
 
     ASTPtr node;
     String name;
+    ASTPtr function_ast;
 
     if (!name_p.parse(pos, node, expected))
         return false;
@@ -253,18 +265,21 @@ bool ParserSetQuery::parseNameValuePairWithParameterOrDefault(
     }
 
     /// Default
-    if (ParserKeyword("DEFAULT").ignore(pos, expected))
+    if (ParserKeyword(Keyword::DEFAULT).ignore(pos, expected))
     {
         default_settings = name;
         return true;
     }
 
     /// Setting
-    if (ParserKeyword("TRUE").ignore(pos, expected))
-        node = std::make_shared<ASTLiteral>(Field(static_cast<UInt64>(1)));
-    else if (ParserKeyword("FALSE").ignore(pos, expected))
-        node = std::make_shared<ASTLiteral>(Field(static_cast<UInt64>(0)));
-    else if (!value_p.parse(pos, node, expected))
+    if (function_p.parse(pos, function_ast, expected) && function_ast->as<ASTFunction>()->name == "disk")
+    {
+        change.name = name;
+        change.value = createFieldFromAST(function_ast);
+
+        return true;
+    }
+    if (!value_p.parse(pos, node, expected))
         return false;
 
     change.name = name;
@@ -280,18 +295,18 @@ bool ParserSetQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 
     if (!parse_only_internals)
     {
-        ParserKeyword s_set("SET");
+        ParserKeyword s_set(Keyword::SET);
 
         if (!s_set.ignore(pos, expected))
             return false;
 
         /// Parse SET TRANSACTION ... queries using ParserTransactionControl
-        if (ParserKeyword{"TRANSACTION"}.check(pos, expected))
+        if (ParserKeyword{Keyword::TRANSACTION}.check(pos, expected))
             return false;
     }
 
     SettingsChanges changes;
-    NameToNameMap query_parameters;
+    NameToNameVector query_parameters;
     std::vector<String> default_settings;
 
     while (true)
@@ -307,7 +322,7 @@ bool ParserSetQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
             return false;
 
         if (!parameter.first.empty())
-            query_parameters.emplace(std::move(parameter));
+            query_parameters.emplace_back(std::move(parameter));
         else if (!name_of_default_setting.empty())
             default_settings.emplace_back(std::move(name_of_default_setting));
         else

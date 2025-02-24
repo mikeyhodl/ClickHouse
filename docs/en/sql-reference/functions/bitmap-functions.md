@@ -1,22 +1,18 @@
 ---
-slug: /en/sql-reference/functions/bitmap-functions
-sidebar_position: 49
+slug: /sql-reference/functions/bitmap-functions
+sidebar_position: 25
 sidebar_label: Bitmap
 ---
 
 # Bitmap Functions
 
-Bitmap functions work for two bitmaps Object value calculation, it is to return new bitmap or cardinality while using formula calculation, such as and, or, xor, and not, etc.
-
-There are 2 kinds of construction methods for Bitmap Object. One is to be constructed by aggregation function groupBitmap with -State, the other is to be constructed by Array Object. It is also to convert Bitmap Object to Array Object.
-
-RoaringBitmap is wrapped into a data structure while actual storage of Bitmap objects. When the cardinality is less than or equal to 32, it uses Set objet. When the cardinality is greater than 32, it uses RoaringBitmap object. That is why storage of low cardinality set is faster.
-
-For more information on RoaringBitmap, see: [CRoaring](https://github.com/RoaringBitmap/CRoaring).
+Bitmaps can be constructed in two ways. The first way is constructed by aggregation function groupBitmap with `-State`, the other way is to constructed a bitmap from an Array object.
 
 ## bitmapBuild
 
-Build a bitmap from unsigned integer array.
+Builds a bitmap from an unsigned integer array.
+
+**Syntax**
 
 ``` sql
 bitmapBuild(array)
@@ -24,7 +20,7 @@ bitmapBuild(array)
 
 **Arguments**
 
--   `array` – Unsigned integer array.
+- `array` – Unsigned integer array.
 
 **Example**
 
@@ -40,7 +36,9 @@ SELECT bitmapBuild([1, 2, 3, 4, 5]) AS res, toTypeName(res);
 
 ## bitmapToArray
 
-Convert bitmap to integer array.
+Converts bitmap to an integer array.
+
+**Syntax**
 
 ``` sql
 bitmapToArray(bitmap)
@@ -48,13 +46,15 @@ bitmapToArray(bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─────────┐
@@ -64,7 +64,9 @@ SELECT bitmapToArray(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 
 ## bitmapSubsetInRange
 
-Return subset in specified range (not include the range_end).
+Returns the subset of a bitmap with bits within a value interval.
+
+**Syntax**
 
 ``` sql
 bitmapSubsetInRange(bitmap, range_start, range_end)
@@ -72,15 +74,17 @@ bitmapSubsetInRange(bitmap, range_start, range_end)
 
 **Arguments**
 
--   `bitmap` – [Bitmap object](#bitmap_functions-bitmapbuild).
--   `range_start` – Range start point. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
--   `range_end` – Range end point (excluded). Type: [UInt32](../../sql-reference/data-types/int-uint.md).
+- `bitmap` – [Bitmap object](#bitmapbuild).
+- `range_start` – Start of the range (inclusive). [UInt32](../data-types/int-uint.md).
+- `range_end` – End of the range (exclusive). [UInt32](../data-types/int-uint.md).
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapSubsetInRange(bitmapBuild([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,100,200,500]), toUInt32(30), toUInt32(200))) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res───────────────┐
@@ -90,7 +94,7 @@ SELECT bitmapToArray(bitmapSubsetInRange(bitmapBuild([0,1,2,3,4,5,6,7,8,9,10,11,
 
 ## bitmapSubsetLimit
 
-Creates a subset of bitmap with n elements taken between `range_start` and `cardinality_limit`.
+Returns a subset of a bitmap with smallest bit value `range_start` and at most `cardinality_limit` elements.
 
 **Syntax**
 
@@ -100,19 +104,11 @@ bitmapSubsetLimit(bitmap, range_start, cardinality_limit)
 
 **Arguments**
 
--   `bitmap` – [Bitmap object](#bitmap_functions-bitmapbuild).
--   `range_start` – The subset starting point. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
--   `cardinality_limit` – The subset cardinality upper limit. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
-
-**Returned value**
-
-The subset.
-
-Type: [Bitmap object](#bitmap_functions-bitmapbuild).
+- `bitmap` – [Bitmap object](#bitmapbuild).
+- `range_start` – Start of the range (inclusive). [UInt32](../data-types/int-uint.md).
+- `cardinality_limit` – Maximum cardinality of the subset. [UInt32](../data-types/int-uint.md).
 
 **Example**
-
-Query:
 
 ``` sql
 SELECT bitmapToArray(bitmapSubsetLimit(bitmapBuild([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,100,200,500]), toUInt32(30), toUInt32(200))) AS res;
@@ -128,7 +124,7 @@ Result:
 
 ## subBitmap
 
-Returns the bitmap elements, starting from the `offset` position. The number of returned elements is limited by the `cardinality_limit` parameter. Analog of the [substring](string-functions.md#substring)) string function, but for bitmap.
+Returns a subset of the bitmap, starting from position `offset`. The maximum cardinality of the returned bitmap is `cardinality_limit`.
 
 **Syntax**
 
@@ -138,19 +134,11 @@ subBitmap(bitmap, offset, cardinality_limit)
 
 **Arguments**
 
--   `bitmap` – The bitmap. Type: [Bitmap object](#bitmap_functions-bitmapbuild).
--   `offset` – The position of the first element of the subset. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
--   `cardinality_limit` – The maximum number of elements in the subset. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
-
-**Returned value**
-
-The subset.
-
-Type: [Bitmap object](#bitmap_functions-bitmapbuild).
+- `bitmap` – The bitmap. [Bitmap object](#bitmapbuild).
+- `offset` – The position of the first element of the subset. [UInt32](../data-types/int-uint.md).
+- `cardinality_limit` – The maximum number of elements in the subset. [UInt32](../data-types/int-uint.md).
 
 **Example**
-
-Query:
 
 ``` sql
 SELECT bitmapToArray(subBitmap(bitmapBuild([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,100,200,500]), toUInt32(10), toUInt32(10))) AS res;
@@ -169,26 +157,26 @@ Result:
 Checks whether the bitmap contains an element.
 
 ``` sql
-bitmapContains(haystack, needle)
+bitmapContains(bitmap, needle)
 ```
 
 **Arguments**
 
--   `haystack` – [Bitmap object](#bitmap_functions-bitmapbuild), where the function searches.
--   `needle` – Value that the function searches. Type: [UInt32](../../sql-reference/data-types/int-uint.md).
+- `bitmap` – [Bitmap object](#bitmapbuild).
+- `needle` – Searched bit value. [UInt32](../data-types/int-uint.md).
 
 **Returned values**
 
--   0 — If `haystack` does not contain `needle`.
--   1 — If `haystack` contains `needle`.
-
-Type: `UInt8`.
+- 0 — If `bitmap` does not contain `needle`. [UInt8](../data-types/int-uint.md).
+- 1 — If `bitmap` contains `needle`. [UInt8](../data-types/int-uint.md).
 
 **Example**
 
 ``` sql
 SELECT bitmapContains(bitmapBuild([1,5,7,9]), toUInt32(9)) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -198,28 +186,33 @@ SELECT bitmapContains(bitmapBuild([1,5,7,9]), toUInt32(9)) AS res;
 
 ## bitmapHasAny
 
-Checks whether two bitmaps have intersection by some elements.
+Checks whether two bitmaps intersect.
+
+If `bitmap2` contains exactly one element, consider using [bitmapContains](#bitmapcontains) instead as it works more efficiently.
+
+**Syntax**
 
 ``` sql
 bitmapHasAny(bitmap1, bitmap2)
 ```
 
-If you are sure that `bitmap2` contains strictly one element, consider using the [bitmapContains](#bitmap_functions-bitmapcontains) function. It works more efficiently.
-
 **Arguments**
 
--   `bitmap*` – Bitmap object.
+- `bitmap1` – Bitmap object 1.
+- `bitmap2` – Bitmap object 2.
 
 **Return values**
 
--   `1`, if `bitmap1` and `bitmap2` have one similar element at least.
--   `0`, otherwise.
+- `1`, if `bitmap1` and `bitmap2` have at least one shared element.
+- `0`, otherwise.
 
 **Example**
 
 ``` sql
 SELECT bitmapHasAny(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -229,22 +222,29 @@ SELECT bitmapHasAny(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 
 ## bitmapHasAll
 
-Analogous to `hasAll(array, array)` returns 1 if the first bitmap contains all the elements of the second one, 0 otherwise.
-If the second argument is an empty bitmap then returns 1.
+Returns 1 if the first bitmap contains all elements of the second bitmap, otherwise 0.
+If the second bitmap is empty, returns 1.
+
+Also see `hasAll(array, array)`.
+
+**Syntax**
 
 ``` sql
-bitmapHasAll(bitmap,bitmap)
+bitmapHasAll(bitmap1, bitmap2)
 ```
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap1` – Bitmap object 1.
+- `bitmap2` – Bitmap object 2.
 
 **Example**
 
 ``` sql
 SELECT bitmapHasAll(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -254,7 +254,9 @@ SELECT bitmapHasAll(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 
 ## bitmapCardinality
 
-Retrun bitmap cardinality of type UInt64.
+Returns the cardinality of a bitmap.
+
+**Syntax**
 
 ``` sql
 bitmapCardinality(bitmap)
@@ -262,13 +264,15 @@ bitmapCardinality(bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapCardinality(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -278,19 +282,25 @@ SELECT bitmapCardinality(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 
 ## bitmapMin
 
-Retrun the smallest value of type UInt64 in the set, UINT32_MAX if the set is empty.
+Computes the smallest bit set in a bitmap, or UINT32_MAX if the bitmap is empty.
 
-    bitmapMin(bitmap)
+**Syntax**
+
+```sql 
+bitmapMin(bitmap)
+```
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapMin(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 ```
+
+Result:
 
 ``` text
  ┌─res─┐
@@ -300,19 +310,25 @@ SELECT bitmapMin(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 
 ## bitmapMax
 
-Retrun the greatest value of type UInt64 in the set, 0 if the set is empty.
+Computes the greatest bit set in a bitmap, or 0 if the bitmap is empty.
 
-    bitmapMax(bitmap)
+**Syntax**
+
+```sql 
+bitmapMax(bitmap)
+```
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapMax(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 ```
+
+Result:
 
 ``` text
  ┌─res─┐
@@ -322,21 +338,29 @@ SELECT bitmapMax(bitmapBuild([1, 2, 3, 4, 5])) AS res;
 
 ## bitmapTransform
 
-Transform an array of values in a bitmap to another array of values, the result is a new bitmap.
+Replaces at most N bits in a bitmap. The old and new value of the i-th replaced bit is given by `from_array[i]` and `to_array[i]`.
 
-    bitmapTransform(bitmap, from_array, to_array)
+The result depends on the array ordering if `from_array` and `to_array`.
+
+**Syntax**
+
+``` sql
+bitmapTransform(bitmap, from_array, to_array)
+```
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
--   `from_array` – UInt32 array. For idx in range \[0, from_array.size()), if bitmap contains from_array\[idx\], then replace it with to_array\[idx\]. Note that the result depends on array ordering if there are common elements between from_array and to_array.
--   `to_array` – UInt32 array, its size shall be the same to from_array.
+- `bitmap` – Bitmap object.
+- `from_array` – UInt32 array. For idx in range \[0, from_array.size()), if bitmap contains from_array\[idx\], then replace it with to_array\[idx\].
+- `to_array` – UInt32 array with the same size as `from_array`.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapTransform(bitmapBuild([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), cast([5,999,2] as Array(UInt32)), cast([2,888,20] as Array(UInt32)))) AS res;
 ```
+
+Result:
 
 ``` text
  ┌─res───────────────────┐
@@ -346,7 +370,9 @@ SELECT bitmapToArray(bitmapTransform(bitmapBuild([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 ## bitmapAnd
 
-Two bitmap and calculation, the result is a new bitmap.
+Computes the logical conjunction of two bitmaps.
+
+**Syntax**
 
 ``` sql
 bitmapAnd(bitmap,bitmap)
@@ -354,13 +380,15 @@ bitmapAnd(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapAnd(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -370,7 +398,9 @@ SELECT bitmapToArray(bitmapAnd(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS re
 
 ## bitmapOr
 
-Two bitmap or calculation, the result is a new bitmap.
+Computes the logical disjunction of two bitmaps.
+
+**Syntax**
 
 ``` sql
 bitmapOr(bitmap,bitmap)
@@ -378,13 +408,15 @@ bitmapOr(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapOr(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─────────┐
@@ -394,7 +426,9 @@ SELECT bitmapToArray(bitmapOr(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS res
 
 ## bitmapXor
 
-Two bitmap xor calculation, the result is a new bitmap.
+Xor-s two bitmaps.
+
+**Syntax**
 
 ``` sql
 bitmapXor(bitmap,bitmap)
@@ -402,13 +436,15 @@ bitmapXor(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapXor(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res───────┐
@@ -418,7 +454,9 @@ SELECT bitmapToArray(bitmapXor(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS re
 
 ## bitmapAndnot
 
-Two bitmap andnot calculation, the result is a new bitmap.
+Computes the logical conjunction of two bitmaps and negates the result.
+
+**Syntax**
 
 ``` sql
 bitmapAndnot(bitmap,bitmap)
@@ -426,13 +464,15 @@ bitmapAndnot(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapToArray(bitmapAndnot(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res───┐
@@ -442,7 +482,9 @@ SELECT bitmapToArray(bitmapAndnot(bitmapBuild([1,2,3]),bitmapBuild([3,4,5]))) AS
 
 ## bitmapAndCardinality
 
-Two bitmap and calculation, return cardinality of type UInt64.
+Returns the cardinality of the logical conjunction of two bitmaps.
+
+**Syntax**
 
 ``` sql
 bitmapAndCardinality(bitmap,bitmap)
@@ -450,13 +492,15 @@ bitmapAndCardinality(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapAndCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -466,7 +510,7 @@ SELECT bitmapAndCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 
 ## bitmapOrCardinality
 
-Two bitmap or calculation, return cardinality of type UInt64.
+Returns the cardinality of the logical disjunction of two bitmaps.
 
 ``` sql
 bitmapOrCardinality(bitmap,bitmap)
@@ -474,13 +518,15 @@ bitmapOrCardinality(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapOrCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -490,7 +536,7 @@ SELECT bitmapOrCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 
 ## bitmapXorCardinality
 
-Two bitmap xor calculation, return cardinality of type UInt64.
+Returns the cardinality of the XOR of two bitmaps.
 
 ``` sql
 bitmapXorCardinality(bitmap,bitmap)
@@ -498,13 +544,15 @@ bitmapXorCardinality(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
 ``` sql
 SELECT bitmapXorCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
+
+Result:
 
 ``` text
 ┌─res─┐
@@ -514,7 +562,7 @@ SELECT bitmapXorCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 
 ## bitmapAndnotCardinality
 
-Two bitmap andnot calculation, return cardinality of type UInt64.
+Returns the cardinality of the AND-NOT operation of two bitmaps.
 
 ``` sql
 bitmapAndnotCardinality(bitmap,bitmap)
@@ -522,7 +570,7 @@ bitmapAndnotCardinality(bitmap,bitmap)
 
 **Arguments**
 
--   `bitmap` – Bitmap object.
+- `bitmap` – Bitmap object.
 
 **Example**
 
@@ -530,9 +578,10 @@ bitmapAndnotCardinality(bitmap,bitmap)
 SELECT bitmapAndnotCardinality(bitmapBuild([1,2,3]),bitmapBuild([3,4,5])) AS res;
 ```
 
+Result:
+
 ``` text
 ┌─res─┐
 │   2 │
 └─────┘
 ```
-

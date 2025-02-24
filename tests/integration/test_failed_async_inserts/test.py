@@ -2,8 +2,6 @@ import logging
 from time import sleep
 
 import pytest
-from helpers.cluster import ClickHouseCluster
-
 
 from helpers.cluster import ClickHouseCluster
 
@@ -51,4 +49,4 @@ def test_failed_async_inserts(started_cluster):
 
     assert node.query(select_query) == "4\n"
 
-    node.query("DROP TABLE IF EXISTS async_insert_30_10_2022 NO DELAY")
+    node.query("DROP TABLE IF EXISTS async_insert_30_10_2022 SYNC")

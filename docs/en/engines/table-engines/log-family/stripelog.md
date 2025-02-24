@@ -1,14 +1,14 @@
 ---
-slug: /en/engines/table-engines/log-family/stripelog
+slug: /engines/table-engines/log-family/stripelog
 toc_priority: 32
 toc_title: StripeLog
 ---
 
-# Stripelog
+# StripeLog
 
 This engine belongs to the family of log engines. See the common properties of log engines and their differences in the [Log Engine Family](../../../engines/table-engines/log-family/index.md) article.
 
-Use this engine in scenarios when you need to write many tables with a small amount of data (less than 1 million rows).
+Use this engine in scenarios when you need to write many tables with a small amount of data (less than 1 million rows). For example, this table can be used to store incoming data batches for transformation where atomic processing of them is required. 100k instances of this table type are viable for a ClickHouse server. This table engine should be preferred over [Log](./log.md) when a high number of tables are required. This is at the expense of read efficiency.
 
 ## Creating a Table {#table_engines-stripelog-creating-a-table}
 
@@ -29,8 +29,8 @@ The `StripeLog` engine stores all the columns in one file. For each `INSERT` que
 
 For each table ClickHouse writes the files:
 
--   `data.bin` — Data file.
--   `index.mrk` — File with marks. Marks contain offsets for each column of each data block inserted.
+- `data.bin` — Data file.
+- `index.mrk` — File with marks. Marks contain offsets for each column of each data block inserted.
 
 The `StripeLog` engine does not support the `ALTER UPDATE` and `ALTER DELETE` operations.
 
@@ -90,5 +90,3 @@ SELECT * FROM stripe_log_table ORDER BY timestamp
 │ 2019-01-18 14:34:53 │ WARNING      │ The first warning message  │
 └─────────────────────┴──────────────┴────────────────────────────┘
 ```
-
-[Original article](https://clickhouse.com/docs/en/operations/table_engines/stripelog/) <!--hide-->

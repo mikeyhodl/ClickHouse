@@ -1,8 +1,8 @@
 ---
-slug: /en/sql-reference/data-types/geo
-sidebar_position: 62
+slug: /sql-reference/data-types/geo
+sidebar_position: 54
 sidebar_label: Geo
-title: "Geo Data Types"
+title: "Geometric"
 ---
 
 ClickHouse supports data types for representing geographical objects — locations, lands, etc.
@@ -26,14 +26,14 @@ SELECT p, toTypeName(p) FROM geo_point;
 Result:
 
 ``` text
-┌─p─────┬─toTypeName(p)─┐
+┌─p───────┬─toTypeName(p)─┐
 │ (10,10) │ Point         │
-└───────┴───────────────┘
+└─────────┴───────────────┘
 ```
 
 ## Ring
 
-`Ring` is a simple polygon without holes stored as an array of points: [Array](array.md)([Point](#point-data-type)).
+`Ring` is a simple polygon without holes stored as an array of points: [Array](array.md)([Point](#point)).
 
 **Example**
 
@@ -52,9 +52,51 @@ Result:
 └───────────────────────────────┴───────────────┘
 ```
 
+## LineString
+
+`LineString` is a line stored as an array of points: [Array](array.md)([Point](#point)).
+
+**Example**
+
+Query:
+
+```sql
+CREATE TABLE geo_linestring (l LineString) ENGINE = Memory();
+INSERT INTO geo_linestring VALUES([(0, 0), (10, 0), (10, 10), (0, 10)]);
+SELECT l, toTypeName(l) FROM geo_linestring;
+```
+Result:
+
+``` text
+┌─r─────────────────────────────┬─toTypeName(r)─┐
+│ [(0,0),(10,0),(10,10),(0,10)] │ LineString    │
+└───────────────────────────────┴───────────────┘
+```
+
+## MultiLineString
+
+`MultiLineString` is multiple lines stored as an array of `LineString`: [Array](array.md)([LineString](#linestring)).
+
+**Example**
+
+Query:
+
+```sql
+CREATE TABLE geo_multilinestring (l MultiLineString) ENGINE = Memory();
+INSERT INTO geo_multilinestring VALUES([[(0, 0), (10, 0), (10, 10), (0, 10)], [(1, 1), (2, 2), (3, 3)]]);
+SELECT l, toTypeName(l) FROM geo_multilinestring;
+```
+Result:
+
+``` text
+┌─l───────────────────────────────────────────────────┬─toTypeName(l)───┐
+│ [[(0,0),(10,0),(10,10),(0,10)],[(1,1),(2,2),(3,3)]] │ MultiLineString │
+└─────────────────────────────────────────────────────┴─────────────────┘
+```
+
 ## Polygon
 
-`Polygon` is a polygon with holes stored as an array of rings: [Array](array.md)([Ring](#ring-data-type)). First element of outer array is the outer shape of polygon and all the following elements are holes.
+`Polygon` is a polygon with holes stored as an array of rings: [Array](array.md)([Ring](#ring)). First element of outer array is the outer shape of polygon and all the following elements are holes.
 
 **Example**
 
@@ -76,7 +118,7 @@ Result:
 
 ## MultiPolygon
 
-`MultiPolygon` consists of multiple polygons and is stored as an array of polygons: [Array](array.md)([Polygon](#polygon-data-type)).
+`MultiPolygon` consists of multiple polygons and is stored as an array of polygons: [Array](array.md)([Polygon](#polygon)).
 
 **Example**
 
@@ -95,3 +137,6 @@ Result:
 └─────────────────────────────────────────────────────────────────────────────────────────────────┴─────────────────┘
 ```
 
+## Related Content
+
+- [Exploring massive, real-world data sets: 100+ Years of Weather Records in ClickHouse](https://clickhouse.com/blog/real-world-data-noaa-climate-data)

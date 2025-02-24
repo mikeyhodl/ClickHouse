@@ -69,14 +69,14 @@ bool FreezeMetaData::load(DiskPtr data_disk, const String & path)
     auto metadata_storage = data_disk->getMetadataStorage();
     auto file_path = getFileName(path);
 
-    if (!metadata_storage->exists(file_path))
+    if (!metadata_storage->existsFile(file_path))
         return false;
     auto metadata_str = metadata_storage->readFileToString(file_path);
     ReadBufferFromString buffer(metadata_str);
     readIntText(version, buffer);
     if (version < 1 || version > 2)
     {
-        LOG_ERROR(&Poco::Logger::get("FreezeMetaData"), "Unknown frozen metadata version: {}", version);
+        LOG_ERROR(getLogger("FreezeMetaData"), "Unknown frozen metadata version: {}", version);
         return false;
     }
     DB::assertChar('\n', buffer);
@@ -105,7 +105,7 @@ void FreezeMetaData::clean(DiskPtr data_disk, const String & path)
 {
     auto metadata_storage = data_disk->getMetadataStorage();
     auto fname = getFileName(path);
-    if (metadata_storage->exists(fname))
+    if (metadata_storage->existsFile(fname))
     {
         auto tx = metadata_storage->createTransaction();
         tx->unlinkFile(fname);
@@ -132,7 +132,9 @@ BlockIO Unfreezer::systemUnfreeze(const String & backup_name)
     static constexpr auto config_key = "enable_system_unfreeze";
     if (!config.getBool(config_key, false))
     {
-        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "Support for SYSTEM UNFREEZE query is disabled. You can enable it via '{}' server setting", config_key);
+        throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+                        "Support for SYSTEM UNFREEZE query is disabled. You can enable it via '{}' server setting",
+                        config_key);
     }
 
     auto disks_map = local_context->getDisksMap();
@@ -148,10 +150,11 @@ BlockIO Unfreezer::systemUnfreeze(const String & backup_name)
 
     for (const auto & disk: disks)
     {
-        for (const auto& store_path: store_paths)
+        for (const auto & store_path : store_paths)
         {
-            if (!disk->exists(store_path))
+            if (!disk->existsDirectory(store_path))
                 continue;
+
             for (auto prefix_it = disk->iterateDirectory(store_path); prefix_it->isValid(); prefix_it->next())
             {
                 auto prefix_directory = store_path / prefix_it->name();
@@ -171,7 +174,8 @@ BlockIO Unfreezer::systemUnfreeze(const String & backup_name)
                 }
             }
         }
-        if (disk->exists(backup_path))
+
+        if (disk->existsDirectory(backup_path))
         {
             /// After unfreezing we need to clear revision.txt file and empty directories
             disk->removeRecursive(backup_path);
@@ -209,7 +213,7 @@ PartitionCommandsResultInfo Unfreezer::unfreezePartitionsFromTableDirectory(Merg
 
     for (const auto & disk : disks)
     {
-        if (!disk->exists(table_directory))
+        if (!disk->existsDirectory(table_directory))
             continue;
 
         for (auto it = disk->iterateDirectory(table_directory); it->isValid(); it->next())
@@ -230,6 +234,7 @@ PartitionCommandsResultInfo Unfreezer::unfreezePartitionsFromTableDirectory(Merg
             bool keep_shared = removeFreezedPart(disk, path, partition_directory, local_context, zookeeper);
 
             result.push_back(PartitionCommandResultInfo{
+                .command_type = "UNFREEZE PART",
                 .partition_id = partition_id,
                 .part_name = partition_directory,
                 .backup_path = disk->getPath() + table_directory.generic_string(),
@@ -237,11 +242,11 @@ PartitionCommandsResultInfo Unfreezer::unfreezePartitionsFromTableDirectory(Merg
                 .backup_name = backup_name,
             });
 
-            LOG_DEBUG(log, "Unfreezed part by path {}, keep shared data: {}", disk->getPath() + path, keep_shared);
+            LOG_DEBUG(log, "Unfrozen part by path {}, keep shared data: {}", disk->getPath() + path, keep_shared);
         }
     }
 
-    LOG_DEBUG(log, "Unfreezed {} parts", result.size());
+    LOG_DEBUG(log, "Unfrozen {} parts", result.size());
 
     return result;
 }

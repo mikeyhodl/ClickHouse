@@ -1,6 +1,6 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/groupbitmap
-sidebar_position: 128
+slug: /sql-reference/aggregate-functions/reference/groupbitmap
+sidebar_position: 148
 ---
 
 # groupBitmap

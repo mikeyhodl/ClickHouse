@@ -1,8 +1,8 @@
--- Tags: no-parallel
-
+-- Tags: no-random-settings, no-random-merge-tree-settings, no-msan, no-tsan, no-asan, no-debug
+-- small number of insert threads can make insert terribly slow, especially with some build like msan
 DROP TABLE IF EXISTS mt;
 
-CREATE TABLE mt (x UInt64) ENGINE = MergeTree ORDER BY x SETTINGS max_part_loading_threads = 16, parts_to_delay_insert = 100000, parts_to_throw_insert = 100000;
+CREATE TABLE mt (x UInt64) ENGINE = MergeTree ORDER BY x SETTINGS parts_to_delay_insert = 100000, parts_to_throw_insert = 100000;
 
 SYSTEM STOP MERGES mt;
 

@@ -17,7 +17,6 @@ namespace ErrorCodes
 
 namespace GatherUtils
 {
-#pragma GCC visibility push(hidden)
 
 /// Base classes which selects template function implementation with concrete ArraySource or ArraySink
 /// Derived classes should implement selectImpl for ArraySourceSelector and ArraySinkSelector,
@@ -116,8 +115,11 @@ struct ArraySourcePairSelector
     static void selectSource(bool is_second_const, bool is_second_nullable, SecondSource && second,
                              bool is_first_const, bool is_first_nullable, FirstSource && first, Args && ... args)
     {
-        Base::selectSourcePair(is_first_const, is_first_nullable, first,
-                               is_second_const, is_second_nullable, second, args ...);
+        if constexpr (std::is_same_v<FirstSource, SecondSource>)
+        {
+            Base::selectSourcePair(is_first_const, is_first_nullable, first,
+                                   is_second_const, is_second_nullable, second, args ...);
+        }
     }
 };
 
@@ -127,19 +129,20 @@ struct ArrayAndValueSourceSelectorBySink : public ArraySinkSelector<ArrayAndValu
     template <typename Sink, typename ... Args>
     static void selectImpl(Sink && sink, IArraySource & array_source, IValueSource & value_source, Args && ... args)
     {
-        using SynkType = typename std::decay<Sink>::type;
-        using ArraySource = typename SynkType::CompatibleArraySource;
-        using ValueSource = typename SynkType::CompatibleValueSource;
+        using SinkType = typename std::decay_t<Sink>;
+        using ArraySource = typename SinkType::CompatibleArraySource;
+        using ValueSource = typename SinkType::CompatibleValueSource;
 
         auto check_type = [] (auto source_ptr)
         {
             if (source_ptr == nullptr)
-                throw Exception(demangle(typeid(Base).name()) + " expected "
-                            + demangle(typeid(typename SynkType::CompatibleArraySource).name())
-                            + " or " + demangle(typeid(ConstSource<typename SynkType::CompatibleArraySource>).name())
-                            + " or " + demangle(typeid(typename SynkType::CompatibleValueSource).name()) +
-                            + " or " + demangle(typeid(ConstSource<typename SynkType::CompatibleValueSource>).name())
-                            + " but got " + demangle(typeid(*source_ptr).name()), ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "{} expected {} or {} or {} or {} but got {}",
+                                demangle(typeid(Base).name()),
+                                demangle(typeid(typename SinkType::CompatibleArraySource).name()),
+                                demangle(typeid(ConstSource<typename SinkType::CompatibleArraySource>).name()),
+                                demangle(typeid(typename SinkType::CompatibleValueSource).name()),
+                                demangle(typeid(ConstSource<typename SinkType::CompatibleValueSource>).name()),
+                                demangle(typeid(*source_ptr).name()));
         };
         auto check_type_and_call_concat = [& sink, & check_type, & args ...] (auto array_source_ptr, auto value_source_ptr)
         {
@@ -164,7 +167,6 @@ struct ArrayAndValueSourceSelectorBySink : public ArraySinkSelector<ArrayAndValu
     }
 };
 
-#pragma GCC visibility pop
 }
 
 }

@@ -1,5 +1,6 @@
 #include <Parsers/ASTInsertQuery.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterSetQuery.h>
 #include <IO/ConcatReadBuffer.h>
 #include <IO/ReadBufferFromMemory.h>
@@ -13,11 +14,17 @@
 #include <QueryPipeline/Pipe.h>
 #include <Processors/Formats/IInputFormat.h>
 #include "IO/CompressionMethod.h"
-#include "Parsers/ASTLiteral.h"
+#include <Core/Settings.h>
+#include <Parsers/ASTLiteral.h>
 
 
 namespace DB
 {
+namespace Setting
+{
+    extern const SettingsBool input_format_defaults_for_omitted_fields;
+    extern const SettingsUInt64 max_insert_block_size;
+}
 
 namespace ErrorCodes
 {
@@ -37,17 +44,16 @@ InputFormatPtr getInputFormatFromASTInsertQuery(
     const auto * ast_insert_query = ast->as<ASTInsertQuery>();
 
     if (!ast_insert_query)
-        throw Exception("Logical error: query requires data to insert, but it is not INSERT query", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Query requires data to insert, but it is not INSERT query");
 
     if (ast_insert_query->infile && context->getApplicationType() == Context::ApplicationType::SERVER)
-        throw Exception("Query has infile and was send directly to server", ErrorCodes::UNKNOWN_TYPE_OF_QUERY);
+        throw Exception(ErrorCodes::UNKNOWN_TYPE_OF_QUERY, "Query has infile and was send directly to server");
 
     if (ast_insert_query->format.empty())
     {
         if (input_function)
-            throw Exception("FORMAT must be specified for function input()", ErrorCodes::INVALID_USAGE_OF_INPUT);
-        else
-            throw Exception("Logical error: INSERT query requires format to be set", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::INVALID_USAGE_OF_INPUT, "FORMAT must be specified for function input()");
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "INSERT query requires format to be set");
     }
 
     /// Data could be in parsed (ast_insert_query.data) and in not parsed yet (input_buffer_tail_part) part of query.
@@ -59,9 +65,35 @@ InputFormatPtr getInputFormatFromASTInsertQuery(
         : std::make_unique<EmptyReadBuffer>();
 
     /// Create a source from input buffer using format from query
-    auto source = context->getInputFormat(ast_insert_query->format, *input_buffer, header, context->getSettingsRef().max_insert_block_size);
+    auto source = context->getInputFormat(ast_insert_query->format, *input_buffer, header, context->getSettingsRef()[Setting::max_insert_block_size]);
     source->addBuffer(std::move(input_buffer));
     return source;
+}
+
+Pipe getSourceFromInputFormat(
+    const ASTPtr & ast,
+    InputFormatPtr format,
+    ContextPtr context,
+    const ASTPtr & input_function)
+{
+    Pipe pipe(format);
+
+    const auto * ast_insert_query = ast->as<ASTInsertQuery>();
+    if (context->getSettingsRef()[Setting::input_format_defaults_for_omitted_fields] && ast_insert_query->table_id && !input_function)
+    {
+        StoragePtr storage = DatabaseCatalog::instance().getTable(ast_insert_query->table_id, context);
+        auto metadata_snapshot = storage->getInMemoryMetadataPtr();
+        const auto & columns = metadata_snapshot->getColumns();
+        if (columns.hasDefaults())
+        {
+            pipe.addSimpleTransform([&](const Block & cur_header)
+            {
+                return std::make_shared<AddingDefaultsTransform>(cur_header, columns, *format, context);
+            });
+        }
+    }
+
+    return pipe;
 }
 
 Pipe getSourceFromASTInsertQuery(
@@ -71,32 +103,15 @@ Pipe getSourceFromASTInsertQuery(
     ContextPtr context,
     const ASTPtr & input_function)
 {
-    auto source = getInputFormatFromASTInsertQuery(ast, with_buffers, header, context, input_function);
-    Pipe pipe(source);
-
-    const auto * ast_insert_query = ast->as<ASTInsertQuery>();
-    if (context->getSettingsRef().input_format_defaults_for_omitted_fields && ast_insert_query->table_id && !input_function)
-    {
-        StoragePtr storage = DatabaseCatalog::instance().getTable(ast_insert_query->table_id, context);
-        auto metadata_snapshot = storage->getInMemoryMetadataPtr();
-        const auto & columns = metadata_snapshot->getColumns();
-        if (columns.hasDefaults())
-        {
-            pipe.addSimpleTransform([&](const Block & cur_header)
-            {
-                return std::make_shared<AddingDefaultsTransform>(cur_header, columns, *source, context);
-            });
-        }
-    }
-
-    return pipe;
+    auto format = getInputFormatFromASTInsertQuery(ast, with_buffers, header, context, input_function);
+    return getSourceFromInputFormat(ast, std::move(format), std::move(context), input_function);
 }
 
 std::unique_ptr<ReadBuffer> getReadBufferFromASTInsertQuery(const ASTPtr & ast)
 {
     const auto * insert_query = ast->as<ASTInsertQuery>();
     if (!insert_query)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Logical error: query requires data to insert, but it is not INSERT query");
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Query requires data to insert, but it is not INSERT query");
 
     if (insert_query->infile)
     {

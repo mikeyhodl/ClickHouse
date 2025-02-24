@@ -1,8 +1,9 @@
+#include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/IDataType.h>
 #include <Functions/IFunction.h>
 #include <Functions/FunctionFactory.h>
 #include <Core/Field.h>
 #include <Columns/ColumnConst.h>
-#include <DataTypes/DataTypeFactory.h>
 
 
 namespace DB
@@ -48,8 +49,8 @@ public:
     {
         const ColumnConst * col_type_const = typeid_cast<const ColumnConst *>(arguments.front().column.get());
         if (!col_type_const || !isString(arguments.front().type))
-            throw Exception("The argument of function " + getName() + " must be a constant string describing type.",
-                ErrorCodes::ILLEGAL_COLUMN);
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "The argument of function {} must be a constant string describing type.",
+                getName());
 
         return DataTypeFactory::instance().get(col_type_const->getValue<String>());
     }

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -ue
 
-unset CLICKHOUSE_LOG_COMMENT
-
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CURDIR"/../shell_config.sh
@@ -17,7 +15,7 @@ ${CLICKHOUSE_CURL} \
     --get \
     --data-urlencode "query=select 1 format Null"
 
-${CLICKHOUSE_CLIENT} -n -q "
+${CLICKHOUSE_CLIENT} -q "
 system flush logs;
 select interface, initial_query_id = query_id
     from system.query_log

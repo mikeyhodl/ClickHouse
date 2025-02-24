@@ -1,10 +1,9 @@
 #pragma once
 
+#include <Core/Block.h>
 #include <Processors/IProcessor.h>
-#include <QueryPipeline/PipelineResourcesHolder.h>
 #include <QueryPipeline/Chain.h>
-#include <QueryPipeline/SizeLimits.h>
-
+#include <QueryPipeline/QueryPlanResourceHolder.h>
 
 namespace DB
 {
@@ -69,7 +68,12 @@ public:
     void addTransform(ProcessorPtr transform, OutputPort * totals, OutputPort * extremes);
     void addTransform(ProcessorPtr transform, InputPort * totals, InputPort * extremes);
 
-    enum class StreamType
+    void addTransform(
+        ProcessorPtr transform,
+        InputPort * totals_in, InputPort * extremes_in,
+        OutputPort * totals_out, OutputPort * extremes_out);
+
+    enum class StreamType : uint8_t
     {
         Main = 0, /// Stream for query data. There may be several streams of this type.
         Totals,  /// Stream for totals. No more than one.
@@ -101,6 +105,8 @@ public:
     static Processors detachProcessors(Pipe pipe) { return *std::move(pipe.processors); }
     /// Get processors from Pipe without destroying pipe (used for EXPLAIN to keep QueryPlan).
     const Processors & getProcessors() const { return *processors; }
+
+    std::shared_ptr<Processors> getProcessorsPtr() { return processors; }
 
 private:
     /// Header is common for all output below.

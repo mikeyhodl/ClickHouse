@@ -66,6 +66,10 @@ WITH anySimpleState(number) AS c SELECT toTypeName(c), c FROM numbers(1);
 
 В случае применения этого комбинатора, агрегатная функция возвращает не готовое значение (например, в случае функции [uniq](reference/uniq.md#agg_function-uniq) — количество уникальных значений), а промежуточное состояние агрегации (например, в случае функции `uniq` — хэш-таблицу для расчёта количества уникальных значений), которое имеет тип `AggregateFunction(...)` и может использоваться для дальнейшей обработки или может быть сохранено в таблицу для последующей доагрегации.
 
+:::note
+Промежуточное состояние для -MapState не является инвариантом для одних и тех же исходных данные т.к. порядок данных может меняться. Это не влияет, тем не менее, на загрузку таких данных.
+:::
+
 Для работы с промежуточными состояниями предназначены:
 
 -   Движок таблиц [AggregatingMergeTree](../../engines/table-engines/mergetree-family/aggregatingmergetree.md).
@@ -89,7 +93,7 @@ WITH anySimpleState(number) AS c SELECT toTypeName(c), c FROM numbers(1);
 ## -Distinct {#agg-functions-combinator-distinct}
 
 При наличии комбинатора Distinct, каждое уникальное значение аргументов, будет учитано в агрегатной функции только один раз.
-Примеры: `sum(DISTINCT x)`, `groupArray(DISTINCT x)`, `corrStableDistinct(DISTINCT x, y)` и т.п.
+Примеры: `sum(DISTINCT x)` (или `sumDistinct(x)`), `groupArray(DISTINCT x)` (или `groupArrayDistinct(x)`), `corrStable(DISTINCT x, y)` (или `corrStableDistinct(x, y)`) и т.п.
 
 ## -OrDefault {#agg-functions-combinator-ordefault}
 

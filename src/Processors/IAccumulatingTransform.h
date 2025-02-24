@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/Block.h>
+#include <Processors/Chunk.h>
 #include <Processors/IProcessor.h>
 
 
@@ -35,10 +37,6 @@ public:
 
     Status prepare() override;
     void work() override;
-
-    /// Adds additional port for totals.
-    /// If added, totals will have been ready by the first generate() call (in totals chunk).
-    InputPort * addTotalsPort();
 
     InputPort & getInputPort() { return input; }
     OutputPort & getOutputPort() { return output; }

@@ -10,10 +10,9 @@ template <typename A>
 struct AbsImpl
 {
     using ResultType = std::conditional_t<is_decimal<A>, A, typename NumberTraits::ResultOfAbs<A>::Type>;
-    static const constexpr bool allow_fixed_string = false;
-    static const constexpr bool allow_string_integer = false;
+    static constexpr bool allow_string_or_fixed_string = false;
 
-    static inline NO_SANITIZE_UNDEFINED ResultType apply(A a)
+    static NO_SANITIZE_UNDEFINED ResultType apply(A a)
     {
         if constexpr (is_decimal<A>)
             return a < A(0) ? A(-a) : a;
@@ -23,7 +22,7 @@ struct AbsImpl
             return a < 0 ? static_cast<ResultType>(~a) + 1 : static_cast<ResultType>(a);
         else if constexpr (is_integer<A> && is_unsigned_v<A>)
             return static_cast<ResultType>(a);
-        else if constexpr (std::is_floating_point_v<A>)
+        else if constexpr (is_floating_point<A>)
             return static_cast<ResultType>(std::abs(a));
     }
 
@@ -38,7 +37,7 @@ using FunctionAbs = FunctionUnaryArithmetic<AbsImpl, NameAbs, false>;
 template <> struct FunctionUnaryArithmeticMonotonicity<NameAbs>
 {
     static bool has() { return true; }
-    static IFunction::Monotonicity get(const Field & left, const Field & right)
+    static IFunction::Monotonicity get(const IDataType &, const Field & left, const Field & right)
     {
         Float64 left_float = left.isNull() ? -std::numeric_limits<Float64>::infinity() : applyVisitor(FieldVisitorConvertToNumber<Float64>(), left);
         Float64 right_float = right.isNull() ? std::numeric_limits<Float64>::infinity() : applyVisitor(FieldVisitorConvertToNumber<Float64>(), right);
@@ -46,13 +45,13 @@ template <> struct FunctionUnaryArithmeticMonotonicity<NameAbs>
         if ((left_float < 0 && right_float > 0) || (left_float > 0 && right_float < 0))
             return {};
 
-        return { .is_monotonic = true, .is_positive = left_float > 0, .is_strict = true, };
+        return { .is_monotonic = true, .is_positive = std::min(left_float, right_float) >= 0, .is_strict = true, };
     }
 };
 
 REGISTER_FUNCTION(Abs)
 {
-    factory.registerFunction<FunctionAbs>({}, FunctionFactory::CaseInsensitive);
+    factory.registerFunction<FunctionAbs>({}, FunctionFactory::Case::Insensitive);
 }
 
 }

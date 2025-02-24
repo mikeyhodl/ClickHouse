@@ -1,6 +1,6 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/kurtpop
-sidebar_position: 153
+slug: /sql-reference/aggregate-functions/reference/kurtpop
+sidebar_position: 157
 ---
 
 # kurtPop
