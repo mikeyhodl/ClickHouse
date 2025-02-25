@@ -5,6 +5,7 @@
 #include <Processors/ISimpleTransform.h>
 #include <Processors/Transforms/AggregatingTransform.h>
 #include <Processors/Transforms/finalizeChunk.h>
+#include <Processors/Chunk.h>
 
 namespace DB
 {
@@ -12,10 +13,12 @@ namespace DB
 struct InputOrderInfo;
 using InputOrderInfoPtr = std::shared_ptr<const InputOrderInfo>;
 
-struct ChunkInfoWithAllocatedBytes : public ChunkInfo
+struct ChunkInfoWithAllocatedBytes : public ChunkInfoCloneable<ChunkInfoWithAllocatedBytes>
 {
+    ChunkInfoWithAllocatedBytes(const ChunkInfoWithAllocatedBytes & other) = default;
     explicit ChunkInfoWithAllocatedBytes(Int64 allocated_bytes_)
         : allocated_bytes(allocated_bytes_) {}
+
     Int64 allocated_bytes;
 };
 
@@ -23,13 +26,13 @@ class AggregatingInOrderTransform : public IProcessor
 {
 public:
     AggregatingInOrderTransform(Block header, AggregatingTransformParamsPtr params,
-                                InputOrderInfoPtr group_by_info_,
+                                const SortDescription & sort_description_for_merging,
                                 const SortDescription & group_by_description_,
                                 size_t max_block_size_, size_t max_block_bytes_,
                                 ManyAggregatedDataPtr many_data, size_t current_variant);
 
     AggregatingInOrderTransform(Block header, AggregatingTransformParamsPtr params,
-                                InputOrderInfoPtr group_by_info_,
+                                const SortDescription & sort_description_for_merging,
                                 const SortDescription & group_by_description_,
                                 size_t max_block_size_, size_t max_block_bytes_);
 
@@ -42,6 +45,7 @@ public:
     void work() override;
 
     void consume(Chunk chunk);
+    void setRowsBeforeAggregationCounter(RowsBeforeStepCounterPtr counter) override { rows_before_aggregation.swap(counter); }
 
 private:
     void generate();
@@ -58,7 +62,6 @@ private:
     AggregatingTransformParamsPtr params;
     ColumnsMask aggregates_mask;
 
-    InputOrderInfoPtr group_by_info;
     /// For sortBlock()
     SortDescription sort_description;
     SortDescriptionWithPositions group_by_description;
@@ -84,7 +87,9 @@ private:
     Chunk current_chunk;
     Chunk to_push_chunk;
 
-    Poco::Logger * log = &Poco::Logger::get("AggregatingInOrderTransform");
+    RowsBeforeStepCounterPtr rows_before_aggregation;
+
+    LoggerPtr log = getLogger("AggregatingInOrderTransform");
 };
 
 

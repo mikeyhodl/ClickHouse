@@ -1,13 +1,15 @@
 ---
-slug: /en/operations/system-tables/time_zones
-title: time_zones
+description: "System table containing a list of time zones that are supported by the ClickHouse server."
+slug: /operations/system-tables/time_zones
+title: "time_zones"
+keywords: ["system table", "time_zones"]
 ---
 
 Contains a list of time zones that are supported by the ClickHouse server. This list of timezones might vary depending on the version of ClickHouse.
 
 Columns:
 
--   `time_zone` (String) — List of supported time zones.
+- `time_zone` (String) — List of supported time zones.
 
 **Example**
 
@@ -29,5 +31,3 @@ SELECT * FROM system.time_zones LIMIT 10
 │ Africa/Bissau      │
 └────────────────────┘
 ```
-
-[Original article](https://clickhouse.com/docs/en/operations/system-tables/time_zones) <!--hide-->

@@ -14,7 +14,7 @@ ForkWriteBuffer::ForkWriteBuffer(WriteBufferPtrs && sources_)
 {
     if (sources.empty())
     {
-        throw Exception("Expected non-zero number of buffers for `ForkWriteBuffer`", ErrorCodes::CANNOT_CREATE_IO_BUFFER);
+        throw Exception(ErrorCodes::CANNOT_CREATE_IO_BUFFER, "Expected non-zero number of buffers for `ForkWriteBuffer`");
     }
     set(sources.front()->buffer().begin(), sources.front()->buffer().size());
 }
@@ -45,16 +45,20 @@ void ForkWriteBuffer::nextImpl()
 
 void ForkWriteBuffer::finalizeImpl()
 {
+    WriteBuffer::finalizeImpl();
     for (const WriteBufferPtr & buffer : sources)
     {
         buffer->finalize();
     }
 }
 
-ForkWriteBuffer::~ForkWriteBuffer()
+void ForkWriteBuffer::cancelImpl() noexcept
 {
-    finalize();
+    WriteBuffer::cancelImpl();
+    for (const WriteBufferPtr & buffer : sources)
+    {
+        buffer->cancel();
+    }
 }
-
 
 }

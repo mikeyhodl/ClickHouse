@@ -1,6 +1,6 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/categoricalinformationvalue
-sidebar_position: 250
+slug: /sql-reference/aggregate-functions/reference/categoricalinformationvalue
+sidebar_position: 115
 title: categoricalInformationValue
 ---
 

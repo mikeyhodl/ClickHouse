@@ -1,5 +1,10 @@
-#include <Interpreters/ProcessList.h>
 #include "PostgreSQLOutputFormat.h"
+
+#include <Columns/IColumn.h>
+#include <Formats/FormatFactory.h>
+#include <Interpreters/ProcessList.h>
+
+#include <Processors/Port.h>
 
 namespace DB
 {
@@ -55,7 +60,7 @@ void PostgreSQLOutputFormat::consume(Chunk chunk)
     }
 }
 
-void PostgreSQLOutputFormat::flush()
+void PostgreSQLOutputFormat::flushImpl()
 {
     message_transport.flush();
 }
@@ -66,7 +71,8 @@ void registerOutputFormatPostgreSQLWire(FormatFactory & factory)
         "PostgreSQLWire",
         [](WriteBuffer & buf,
            const Block & sample,
-           const RowOutputFormatParams &,
            const FormatSettings & settings) { return std::make_shared<PostgreSQLOutputFormat>(buf, sample, settings); });
+    factory.markOutputFormatNotTTYFriendly("PostgreSQLWire");
 }
+
 }

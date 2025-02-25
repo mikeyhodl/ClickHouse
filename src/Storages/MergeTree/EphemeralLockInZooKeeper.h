@@ -3,10 +3,7 @@
 #include "ReplicatedMergeTreeMutationEntry.h"
 
 #include <Common/ZooKeeper/ZooKeeper.h>
-#include <Common/Exception.h>
-#include <IO/ReadHelpers.h>
 
-#include <map>
 #include <optional>
 
 
@@ -15,22 +12,19 @@ namespace DB
 class ZooKeeperWithFaultInjection;
 using ZooKeeperWithFaultInjectionPtr = std::shared_ptr<ZooKeeperWithFaultInjection>;
 
-namespace ErrorCodes
-{
-    extern const int LOGICAL_ERROR;
-}
-
 /// A class that is used for locking a block number in a partition.
 /// Before 22.11 it used to create a secondary ephemeral node in `temp_path` with "abandonable_lock-" prefix
 /// and a main ephemeral node with `path_prefix` that references the secondary node. The reasons for this two-level scheme are historical.
 /// Since 22.11 it creates single ephemeral node with `path_prefix` that references persistent fake "secondary node".
 class EphemeralLockInZooKeeper : public boost::noncopyable
 {
+    template<typename T>
     friend std::optional<EphemeralLockInZooKeeper> createEphemeralLockInZooKeeper(
-        const String & path_prefix_, const String & temp_path, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const String & deduplication_path);
+        const String & path_prefix_, const String & temp_path, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const T & deduplication_path,
+        const std::optional<String> & znode_data);
 
 protected:
-    EphemeralLockInZooKeeper(const String & path_prefix_, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const String & path_);
+    EphemeralLockInZooKeeper(const String & path_prefix_, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const String & path_, const String & conflict_path_ = "");
 
 public:
     EphemeralLockInZooKeeper() = delete;
@@ -51,6 +45,7 @@ public:
         rhs.zookeeper = nullptr;
         path_prefix = std::move(rhs.path_prefix);
         path = std::move(rhs.path);
+        conflict_path = std::move(rhs.conflict_path);
         return *this;
     }
 
@@ -63,6 +58,13 @@ public:
     {
         checkCreated();
         return path;
+    }
+
+    // In case of async inserts, we try to get locks for multiple inserts and need to know which insert is conflicted.
+    // That's why we need this function.
+    String getConflictPath() const
+    {
+        return conflict_path;
     }
 
     /// Parse the number at the end of the path.
@@ -85,11 +87,7 @@ public:
         zookeeper = nullptr;
     }
 
-    void checkCreated() const
-    {
-        if (!isLocked())
-            throw Exception("EphemeralLock is not created", ErrorCodes::LOGICAL_ERROR);
-    }
+    void checkCreated() const;
 
     ~EphemeralLockInZooKeeper();
 
@@ -97,11 +95,13 @@ private:
     ZooKeeperWithFaultInjectionPtr zookeeper;
     String path_prefix;
     String path;
+    String conflict_path;
 };
 
+template<typename T>
 std::optional<EphemeralLockInZooKeeper> createEphemeralLockInZooKeeper(
-    const String & path_prefix_, const String & temp_path, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const String & deduplication_path);
-
+    const String & path_prefix_, const String & temp_path, const ZooKeeperWithFaultInjectionPtr & zookeeper_, const T & deduplication_path,
+    const std::optional<String> & znode_data);
 
 /// Acquires block number locks in all partitions.
 class EphemeralLocksInAllPartitions : public boost::noncopyable

@@ -1,5 +1,4 @@
-#include "domain.h"
-
+#include <Functions/URL/domain.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/FunctionStringToString.h>
 
@@ -14,23 +13,23 @@ using FunctionDomainRFC = FunctionStringToString<ExtractSubstringImpl<ExtractDom
 
 REGISTER_FUNCTION(Domain)
 {
-    factory.registerFunction<FunctionDomain>(
+    factory.registerFunction<FunctionDomain>(FunctionDocumentation
         {
-        R"(
+        .description=R"(
 Extracts the hostname from a URL.
 
 The URL can be specified with or without a scheme.
 If the argument can't be parsed as URL, the function returns an empty string.
         )",
-        Documentation::Examples{{"domain", "SELECT domain('svn+ssh://some.svn-hosting.com:80/repo/trunk')"}},
-        Documentation::Categories{"URL"}
+        .examples{{"domain", "SELECT domain('svn+ssh://some.svn-hosting.com:80/repo/trunk')", ""}},
+        .category{"URLs"}
         });
 
-    factory.registerFunction<FunctionDomainRFC>(
+    factory.registerFunction<FunctionDomainRFC>(FunctionDocumentation
         {
-        R"(Similar to `domain` but follows stricter rules to be compatible with RFC 3986 and less performant.)",
-        Documentation::Examples{},
-        Documentation::Categories{"URL"}
+        .description=R"(Similar to `domain` but follows stricter rules to be compatible with RFC 3986 and less performant.)",
+        .examples{},
+        .category{"URLs"}
         });
 }
 

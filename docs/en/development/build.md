@@ -1,145 +1,215 @@
 ---
-slug: /en/development/build
-sidebar_position: 64
+slug: /development/build
+sidebar_position: 10
 sidebar_label: Build on Linux
-title: How to Build ClickHouse on Linux
-description: How to build ClickHouse on Linux
 ---
 
+# How to Build ClickHouse on Linux
 
-Supported platforms:
+:::info You don't have to build ClickHouse yourself!
+You can install pre-built ClickHouse as described in [Quick Start](https://clickhouse.com/#quick-start).
+:::
 
--   x86_64
--   AArch64
--   Power9 (experimental)
+ClickHouse can be build on the following platforms:
 
-## Normal Build for Development on Ubuntu
+- x86_64
+- AArch64
+- PowerPC 64 LE (experimental)
+- s390/x (experimental)
+- RISC-V 64 (experimental)
 
-The following tutorial is based on the Ubuntu Linux system. With appropriate changes, it should also work on any other Linux distribution.
+## Assumptions {#assumptions}
 
-### Install Git, CMake, Python and Ninja {#install-git-cmake-python-and-ninja}
+The following tutorial is based on Ubuntu Linux but it should also work on any other Linux distribution with appropriate changes.
+The minimum recommended Ubuntu version for development is 24.04 LTS.
+
+The tutorial assumes that you have the ClickHouse repository and all submodules locally checked out.
+
+## Install Prerequisites {#install-prerequisites}
+
+ClickHouse uses CMake and Ninja for building.
+
+You can optionally install ccache to let the build reuse already compiled object files.
 
 ``` bash
-sudo apt-get install git cmake ccache python3 ninja-build
+sudo apt-get update
+sudo apt-get install git cmake ccache python3 ninja-build nasm yasm gawk lsb-release wget software-properties-common gnupg
 ```
 
-Or cmake3 instead of cmake on older systems.
+## Install the Clang compiler {#install-the-clang-compiler}
 
-### Install the latest clang (recommended)
+To install Clang on Ubuntu/Debian, use LLVM's automatic installation script from [here](https://apt.llvm.org/).
 
-On Ubuntu/Debian you can use the automatic installation script (check [official webpage](https://apt.llvm.org/))
-
-```bash
+``` bash
 sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 ```
 
-For other Linux distribution - check the availability of the [prebuild packages](https://releases.llvm.org/download.html) or build clang [from sources](https://clang.llvm.org/get_started.html).
+For other Linux distributions, check if you can install any of LLVM's [prebuild packages](https://releases.llvm.org/download.html).
 
-#### Use the latest clang for Builds
+As of January 2025, Clang 18 or higher is required.
+GCC or other compilers are not supported.
 
-``` bash
-export CC=clang-15
-export CXX=clang++-15
+## Install the Rust compiler (optional) {#install-the-rust-compiler-optional}
+
+:::note
+Rust is an optional dependency of ClickHouse.
+If Rust is not installed, some features of ClickHouse will be omitted from compilation.
+:::
+
+First, follow the steps in the official [Rust documentation](https://www.rust-lang.org/tools/install) to install `rustup`.
+
+As with C++ dependencies, ClickHouse uses vendoring to control exactly what's installed and avoid depending on third party services (like the `crates.io` registry).
+
+Although in release mode any rust modern rustup toolchain version should work with these dependencies, if you plan to enable sanitizers you must use a version that matches the exact same `std` as the one used in CI (for which we vendor the crates):
+
+```bash
+rustup toolchain install nightly-2024-12-01
+rustup default nightly-2024-12-01
+rustup component add rust-src
 ```
+## Build ClickHouse {#build-clickhouse}
 
-In this example we use version 15 that is the latest as of Sept 2022.
+We recommend to create a separate directory `build` inside `ClickHouse` which contains all build artifacts:
 
-Gcc cannot be used.
-
-### Checkout ClickHouse Sources {#checkout-clickhouse-sources}
-
-``` bash
-git clone --recursive git@github.com:ClickHouse/ClickHouse.git
-```
-
-or
-
-``` bash
-git clone --recursive https://github.com/ClickHouse/ClickHouse.git
-```
-
-### Build ClickHouse {#build-clickhouse}
-
-``` bash
-cd ClickHouse
+```sh
 mkdir build
 cd build
-cmake ..
+```
+
+You can have several different directories (e.g. `build_release`, `build_debug`, etc.) for different build types.
+
+Optional: If you have multiple compiler versions installed, you can optionally specify the exact compiler to use.
+
+```sh
+export CC=clang-19
+export CXX=clang++-19
+```
+
+For development purposes, debug builds are recommended.
+Compared to release builds, they have a lower compiler optimization level (`-O`) which provides a better debugging experience.
+Also, internal exceptions of type `LOGICAL_ERROR` crash immediately instead of failing gracefully.
+
+```sh
+cmake -D CMAKE_BUILD_TYPE=Debug ..
+```
+
+Run ninja to build:
+
+```sh
+ninja clickhouse-server clickhouse-client
+```
+
+If you like to build all the binaries (utilities and tests), run ninja without parameters:
+
+```sh
 ninja
 ```
 
-To create an executable, run `ninja clickhouse`.
-This will create the `programs/clickhouse` executable, which can be used with `client` or `server` arguments.
+You can control the number of parallel build jobs using parameter `-j`:
 
-## How to Build ClickHouse on Any Linux {#how-to-build-clickhouse-on-any-linux}
+```sh
+ninja -j 1 clickhouse-server clickhouse-client
+```
 
-The build requires the following components:
+:::tip
+CMake provides shortcuts for above commands:
 
--   Git (is used only to checkout the sources, it’s not needed for the build)
--   CMake 3.15 or newer
--   Ninja
--   C++ compiler: clang-14 or newer
--   Linker: lld
+```sh
+cmake -S . -B build  # configure build, run from repository top-level directory
+cmake --build build  # compile
+```
+:::
 
-If all the components are installed, you may build in the same way as the steps above.
+## Running the ClickHouse Executable {#running-the-clickhouse-executable}
 
-Example for Ubuntu Eoan:
-``` bash
-sudo apt update
-sudo apt install git cmake ninja-build clang++ python
+After the build completed successfully, you find the executable in `ClickHouse/<build_dir>/programs/`:
+
+The ClickHouse server tries to find a configuration file `config.xml` in the current directory.
+You can alternative specify a configuration file on the command-line via `-C`.
+
+To connect to the ClickHouse server with `clickhouse-client`, open another terminal, navigate to `ClickHouse/build/programs/` and run `./clickhouse client`.
+
+If you get `Connection refused` message on macOS or FreeBSD, try specifying host address 127.0.0.1:
+
+```bash
+clickhouse client --host 127.0.0.1
+```
+
+## Advanced Options {#advanced-options}
+
+### Minimal Build {#minimal-build}
+
+If you don't need functionality provided by third-party libraries, you can speed the build further up:
+
+```sh
+cmake -DENABLE_LIBRARIES=OFF
+```
+
+In case of problems, you are on your own ...
+
+Rust requires an internet connection. To disable Rust support:
+
+```sh
+cmake -DENABLE_RUST=OFF
+```
+
+### Running the ClickHouse Executable {#running-the-clickhouse-executable-1}
+
+You can replace the production version of ClickHouse binary installed in your system with the compiled ClickHouse binary.
+To do that, install ClickHouse on your machine following the instructions from the official website.
+Next, run:
+
+```bash
+sudo service clickhouse-server stop
+sudo cp ClickHouse/build/programs/clickhouse /usr/bin/
+sudo service clickhouse-server start
+```
+
+Note that `clickhouse-client`, `clickhouse-server` and others are symlinks to the commonly shared `clickhouse` binary.
+
+You can also run your custom-built ClickHouse binary with the config file from the ClickHouse package installed on your system:
+
+```bash
+sudo service clickhouse-server stop
+sudo -u clickhouse ClickHouse/build/programs/clickhouse server --config-file /etc/clickhouse-server/config.xml
+````
+
+### Building on Any Linux {#building-on-any-linux}
+
+Install prerequisites on OpenSUSE Tumbleweed:
+
+```bash
+sudo zypper install git cmake ninja clang-c++ python lld nasm yasm gawk
 git clone --recursive https://github.com/ClickHouse/ClickHouse.git
-mkdir build && cd build
-cmake ../ClickHouse
-ninja
+mkdir build
+cmake -S . -B build
+cmake --build build
 ```
 
-Example for OpenSUSE Tumbleweed:
-``` bash
-sudo zypper install git cmake ninja clang-c++ python lld
-git clone --recursive https://github.com/ClickHouse/ClickHouse.git
-mkdir build && cd build
-cmake ../ClickHouse
-ninja
-```
+Install prerequisites on Fedora Rawhide:
 
-Example for Fedora Rawhide:
-``` bash
+```bash
 sudo yum update
-sudo yum --nogpg install git cmake make clang python3 ccache
+sudo yum --nogpg install git cmake make clang python3 ccache lld nasm yasm gawk
 git clone --recursive https://github.com/ClickHouse/ClickHouse.git
-mkdir build && cd build
-cmake ../ClickHouse
-make -j $(nproc)
+mkdir build
+cmake -S . -B build
+cmake --build build
 ```
 
-Here is an example of how to build `clang` and all the llvm infrastructure from sources:
+### Building in docker {#building-in-docker}
 
+We use the docker image `clickhouse/binary-builder` for builds in CI.
+It contains everything necessary to build the binary and packages.
+There is a script `docker/packager/packager` to ease the image usage:
+
+```bash
+# define a directory for the output artifacts
+output_dir="build_results"
+# a simplest build
+./docker/packager/packager --package-type=binary --output-dir "$output_dir"
+# build debian packages
+./docker/packager/packager --package-type=deb --output-dir "$output_dir"
+# by default, debian packages use thin LTO, so we can override it to speed up the build
+CMAKE_FLAGS='-DENABLE_THINLTO=' ./docker/packager/packager --package-type=deb --output-dir "./$(git rev-parse --show-cdup)/build_results"
 ```
-git clone git@github.com:llvm/llvm-project.git
-mkdir llvm-build && cd llvm-build
-cmake -DCMAKE_BUILD_TYPE:STRING=Release -DLLVM_ENABLE_PROJECTS=all ../llvm-project/llvm/
-make -j16
-sudo make install
-hash clang
-clang --version
-```
-
-You can install the older clang like clang-11 from packages and then use it to build the new clang from sources.
-
-Here is an example of how to install the new `cmake` from the official website:
-
-```
-wget https://github.com/Kitware/CMake/releases/download/v3.22.2/cmake-3.22.2-linux-x86_64.sh
-chmod +x cmake-3.22.2-linux-x86_64.sh
-./cmake-3.22.2-linux-x86_64.sh
-export PATH=/home/milovidov/work/cmake-3.22.2-linux-x86_64/bin/:${PATH}
-hash cmake
-```
-
-## You Don’t Have to Build ClickHouse {#you-dont-have-to-build-clickhouse}
-
-ClickHouse is available in pre-built binaries and packages. Binaries are portable and can be run on any Linux flavour.
-
-Binaries are built for stable and LTS releases and also every commit to `master` for each pull request.
-
-To find the freshest build from `master`, go to [commits page](https://github.com/ClickHouse/ClickHouse/commits/master), click on the first green check mark or red cross near commit, and click to the “Details” link right after “ClickHouse Build Check”.

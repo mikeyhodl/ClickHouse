@@ -6,6 +6,7 @@
 #include <Columns/ColumnsCommon.h>
 
 #include <Common/typeid_cast.h>
+#include <Core/SettingsEnums.h>
 #include <DataTypes/DataTypeAggregateFunction.h>
 #include <Interpreters/ExpressionActions.h>
 
@@ -49,7 +50,7 @@ Block TotalsHavingTransform::transformHeader(
 
     if (expression)
     {
-        block = expression->updateHeader(std::move(block));
+        block = expression->updateHeader(block);
         if (remove_filter)
             block.erase(filter_column_name);
     }
@@ -150,13 +151,9 @@ void TotalsHavingTransform::transform(Chunk & chunk)
     /// Block with values not included in `max_rows_to_group_by`. We'll postpone it.
     if (overflow_row)
     {
-        const auto & info = chunk.getChunkInfo();
-        if (!info)
-            throw Exception("Chunk info was not set for chunk in TotalsHavingTransform.", ErrorCodes::LOGICAL_ERROR);
-
-        const auto * agg_info = typeid_cast<const AggregatedChunkInfo *>(info.get());
+        const auto & agg_info = chunk.getChunkInfos().get<AggregatedChunkInfo>();
         if (!agg_info)
-            throw Exception("Chunk should have AggregatedChunkInfo in TotalsHavingTransform.", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should have AggregatedChunkInfo in TotalsHavingTransform.");
 
         if (agg_info->is_overflows)
         {
@@ -189,7 +186,7 @@ void TotalsHavingTransform::transform(Chunk & chunk)
         for (const auto & action : expression->getActions())
         {
             if (action.node->type == ActionsDAG::ActionType::ARRAY_JOIN)
-                throw Exception("Having clause cannot contain arrayJoin", ErrorCodes::ILLEGAL_COLUMN);
+                throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Having clause cannot contain arrayJoin");
         }
 
         expression->execute(finalized_block, num_rows);
@@ -260,7 +257,7 @@ void TotalsHavingTransform::addToTotals(const Chunk & chunk, const IColumn::Filt
             size_t size = vec.size();
 
             if (filter && filter->size() != size)
-                throw Exception("Filter has size which differs from column size", ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Filter has size which differs from column size");
 
             if (filter)
             {

@@ -1,14 +1,14 @@
 ---
-slug: /en/operations/tips
+slug: /operations/tips
 sidebar_position: 58
 sidebar_label: Usage Recommendations
 title: "Usage Recommendations"
 ---
-import SelfManaged from '@site/docs/en/_snippets/_self_managed_only_automated.md';
+import SelfManaged from '@site/docs/_snippets/_self_managed_only_automated.md';
 
 <SelfManaged />
 
-## CPU Scaling Governor
+## CPU Scaling Governor {#cpu-scaling-governor}
 
 Always use the `performance` scaling governor. The `on-demand` scaling governor works much worse with constantly high demand.
 
@@ -18,7 +18,7 @@ $ echo 'performance' | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_gov
 
 ## CPU Limitations {#cpu-limitations}
 
-Processors can overheat. Use `dmesg` to see if the CPU’s clock rate was limited due to overheating.
+Processors can overheat. Use `dmesg` to see if the CPU's clock rate was limited due to overheating.
 The restriction can also be set externally at the datacenter level. You can use `turbostat` to monitor it under a load.
 
 ## RAM {#ram}
@@ -36,9 +36,24 @@ $ echo 0 | sudo tee /proc/sys/vm/overcommit_memory
 Use `perf top` to watch the time spent in the kernel for memory management.
 Permanent huge pages also do not need to be allocated.
 
-:::warning
-If your system has less than 16 GB of RAM, you may experience various memory exceptions because default settings do not match this amount of memory. The recommended amount of RAM is 32 GB or more. You can use ClickHouse in a system with a small amount of RAM, even with 2 GB of RAM, but it requires additional tuning and can ingest at a low rate.
-:::
+### Using less than 16GB of RAM {#using-less-than-16gb-of-ram}
+
+The recommended amount of RAM is 32 GB or more.
+
+If your system has less than 16 GB of RAM, you may experience various memory exceptions because default settings do not match this amount of memory. You can use ClickHouse in a system with a small amount of RAM (as low as 2 GB), but these setups require additional tuning and can only ingest at a low rate.
+
+When using ClickHouse with less than 16GB of RAM, we recommend the following:
+
+- Lower the size of the mark cache in the `config.xml`. It can be set as low as 500 MB, but it cannot be set to zero.
+- Lower the number of query processing threads down to `1`.
+- Lower the `max_block_size` to `8192`. Values as low as `1024` can still be practical.
+- Lower `max_download_threads` to `1`.
+- Set `input_format_parallel_parsing` and `output_format_parallel_formatting` to `0`.
+
+Additional notes:
+- To flush the memory cached by the memory allocator, you can run the `SYSTEM JEMALLOC PURGE`
+command.
+- We do not recommend using S3 or Kafka integrations on low-memory machines because they require significant memory for buffers.
 
 ## Storage Subsystem {#storage-subsystem}
 
@@ -51,9 +66,13 @@ But for storing archives with rare queries, shelves will work.
 ## RAID {#raid}
 
 When using HDD, you can combine their RAID-10, RAID-5, RAID-6 or RAID-50.
-For Linux, software RAID is better (with `mdadm`). We do not recommend using LVM.
+For Linux, software RAID is better (with `mdadm`). 
 When creating RAID-10, select the `far` layout.
 If your budget allows, choose RAID-10.
+
+LVM by itself (without RAID or `mdadm`) is ok, but making RAID with it or combining it with `mdadm` is a less explored option, and there will be more chances for mistakes
+(selecting wrong chunk size; misalignment of chunks; choosing a wrong raid type; forgetting to cleanup disks). If you are confident
+in using LVM, there is nothing against using it.
 
 If you have more than 4 disks, use RAID-6 (preferred) or RAID-50, instead of RAID-5.
 When using RAID-5, RAID-6 or RAID-50, always increase stripe_cache_size, since the default value is usually not the best choice.
@@ -70,7 +89,7 @@ Never set the block size too small or too large.
 You can use RAID-0 on SSD.
 Regardless of RAID use, always use replication for data security.
 
-Enable NCQ with a long queue. For HDD, choose the CFQ scheduler, and for SSD, choose noop. Don’t reduce the ‘readahead’ setting.
+Enable NCQ with a long queue. For HDD, choose the mq-deadline or CFQ scheduler, and for SSD, choose noop. Don't reduce the 'readahead' setting.
 For HDD, enable the write cache.
 
 Make sure that [`fstrim`](https://en.wikipedia.org/wiki/Trim_(computing)) is enabled for NVME and SSD disks in your OS (usually it's implemented using a cronjob or systemd service).
@@ -89,7 +108,7 @@ While ClickHouse can work over NFS, it is not the best idea.
 
 ## Linux Kernel {#linux-kernel}
 
-Don’t use an outdated Linux kernel.
+Don't use an outdated Linux kernel.
 
 ## Network {#network}
 
@@ -107,16 +126,24 @@ On newer Linux kernels transparent huge pages are alright.
 $ echo 'madvise' | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
 ```
 
-## Hypervisor configuration
+If you want to modify the transparent huge pages setting permanently, editing the `/etc/default/grub` to add the `transparent_hugepage=madvise` to the `GRUB_CMDLINE_LINUX_DEFAULT` option:
+
+```bash
+$ GRUB_CMDLINE_LINUX_DEFAULT="transparent_hugepage=madvise ..."
+```
+
+After that, run the `sudo update-grub` command then reboot to take effect.
+
+## Hypervisor configuration {#hypervisor-configuration}
 
 If you are using OpenStack, set
-```
+```ini
 cpu_mode=host-passthrough
 ```
 in `nova.conf`.
 
 If you are using libvirt, set
-```
+```xml
 <cpu mode='host-passthrough'/>
 ```
 in XML configuration.
@@ -126,15 +153,15 @@ Otherwise you may get `Illegal instruction` crashes when hypervisor is run on ol
 
 ## ClickHouse Keeper and ZooKeeper {#zookeeper}
 
-ClickHouse Keeper is recommended to replace ZooKeeper for ClickHouse clusters.  See the documentation for [ClickHouse Keeper](clickhouse-keeper.md)
+ClickHouse Keeper is recommended to replace ZooKeeper for ClickHouse clusters.  See the documentation for [ClickHouse Keeper](../guides/sre/keeper/index.md)
 
 If you would like to continue using ZooKeeper then it is best to use a fresh version of ZooKeeper – 3.4.9 or later. The version in stable Linux distributions may be outdated.
 
-You should never use manually written scripts to transfer data between different ZooKeeper clusters, because the result will be incorrect for sequential nodes. Never use the “zkcopy” utility for the same reason: https://github.com/ksprojects/zkcopy/issues/15
+You should never use manually written scripts to transfer data between different ZooKeeper clusters, because the result will be incorrect for sequential nodes. Never use the "zkcopy" utility for the same reason: https://github.com/ksprojects/zkcopy/issues/15
 
 If you want to divide an existing ZooKeeper cluster into two, the correct way is to increase the number of its replicas and then reconfigure it as two independent clusters.
 
-You can run ClickHouse Keeper on the same server as ClickHouse in test environments, or in environments with low ingestion rate. 
+You can run ClickHouse Keeper on the same server as ClickHouse in test environments, or in environments with low ingestion rate.
 For production environments we suggest to use separate servers for ClickHouse and ZooKeeper/Keeper, or place ClickHouse files and Keeper files on to separate disks. Because ZooKeeper/Keeper are very sensitive for disk latency and ClickHouse may utilize all available system resources.
 
 You can have ZooKeeper observers in an ensemble but ClickHouse servers should not interact with observers.
@@ -143,7 +170,7 @@ Do not change `minSessionTimeout` setting, large values may affect ClickHouse re
 
 With the default settings, ZooKeeper is a time bomb:
 
-> The ZooKeeper server won’t delete files from old snapshots and logs when using the default configuration (see `autopurge`), and this is the responsibility of the operator.
+> The ZooKeeper server won't delete files from old snapshots and logs when using the default configuration (see `autopurge`), and this is the responsibility of the operator.
 
 This bomb must be defused.
 
@@ -285,4 +312,6 @@ end script
 
 If you use antivirus software configure it to skip folders with ClickHouse datafiles (`/var/lib/clickhouse`) otherwise performance may be reduced and you may experience unexpected errors during data ingestion and background merges.
 
-[Original article](https://clickhouse.com/docs/en/operations/tips/)
+## Related Content {#related-content}
+
+- [Getting started with ClickHouse? Here are 13 "Deadly Sins" and how to avoid them](https://clickhouse.com/blog/common-getting-started-issues-with-clickhouse)

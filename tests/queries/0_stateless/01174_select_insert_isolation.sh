@@ -2,6 +2,7 @@
 # Tags: long, no-ordinary-database
 
 # shellcheck disable=SC2015
+# shellcheck disable=SC2119
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -15,7 +16,7 @@ $CLICKHOUSE_CLIENT --query "CREATE TABLE mt (n Int8, m Int8) ENGINE=MergeTree OR
 function thread_insert_commit()
 {
     for i in {1..50}; do
-        $CLICKHOUSE_CLIENT --multiquery --query "
+        $CLICKHOUSE_CLIENT --query "
         BEGIN TRANSACTION;
         INSERT INTO mt VALUES /* ($i, $1) */ ($i, $1);
         INSERT INTO mt VALUES /* (-$i, $1) */ (-$i, $1);
@@ -26,7 +27,7 @@ function thread_insert_commit()
 function thread_insert_rollback()
 {
     for _ in {1..50}; do
-        $CLICKHOUSE_CLIENT --multiquery --query "
+        $CLICKHOUSE_CLIENT --query "
         BEGIN TRANSACTION;
         INSERT INTO mt VALUES /* (42, $1) */ (42, $1);
         ROLLBACK;";
@@ -37,7 +38,7 @@ function thread_select()
 {
     while true; do
         # The first and the last queries must get the same result
-        $CLICKHOUSE_CLIENT --multiquery --query "
+        $CLICKHOUSE_CLIENT --query "
         BEGIN TRANSACTION;
         SET throw_on_unsupported_query_inside_transaction=0;
         CREATE TEMPORARY TABLE tmp AS SELECT arraySort(groupArray(n)), arraySort(groupArray(m)), arraySort(groupArray(_part)) FROM mt FORMAT Null;
@@ -55,9 +56,9 @@ thread_select & PID_4=$!
 wait $PID_1 && wait $PID_2 && wait $PID_3
 kill -TERM $PID_4
 wait
-wait_for_queries_to_finish
+wait_for_queries_to_finish 40
 
-$CLICKHOUSE_CLIENT --multiquery --query "
+$CLICKHOUSE_CLIENT --query "
 BEGIN TRANSACTION;
 SELECT count(), sum(n), sum(m=1), sum(m=2), sum(m=3) FROM mt;";
 

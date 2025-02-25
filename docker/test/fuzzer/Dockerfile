@@ -8,7 +8,7 @@ ARG apt_archive="http://archive.ubuntu.com"
 RUN sed -i "s|http://archive.ubuntu.com|$apt_archive|g" /etc/apt/sources.list
 
 ENV LANG=C.UTF-8
-ENV TZ=Europe/Moscow
+ENV TZ=Europe/Amsterdam
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 RUN apt-get update \
@@ -29,16 +29,17 @@ RUN apt-get update \
             wget \
     && apt-get autoremove --yes \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/debconf /tmp/*
 
-RUN pip3 install Jinja2
+COPY requirements.txt /
+RUN pip3 install --no-cache-dir -r /requirements.txt
 
 COPY * /
 
 SHELL ["/bin/bash", "-c"]
 CMD set -o pipefail \
     && cd /workspace \
-    && /run-fuzzer.sh 2>&1 | ts "$(printf '%%Y-%%m-%%d %%H:%%M:%%S\t')" | tee main.log
+    && timeout -s 9 1h /run-fuzzer.sh 2>&1 | ts "$(printf '%%Y-%%m-%%d %%H:%%M:%%S\t')" | tee main.log
 
 # docker run --network=host --volume <workspace>:/workspace -e PR_TO_TEST=<> -e SHA_TO_TEST=<> clickhouse/fuzzer
 

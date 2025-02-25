@@ -49,7 +49,7 @@ ClickHouse可以接受和返回各种格式的数据。受支持的输入格式�
 | [AvroConfluent](#data-format-avro-confluent)                                            | ✔     | ✗      |
 | [Parquet](#data-format-parquet)                                                         | ✔     | ✔      |
 | [Arrow](#data-format-arrow)                                                             | ✔     | ✔      |
-| [ArrowStream](#data-format-arrow-stream)                                                | ✔     | ✔      |
+| [ArrowStream](#data-format-arrow)                                                | ✔     | ✔      |
 | [ORC](#data-format-orc)                                                                 | ✔     | ✔      |
 | [RowBinary](#rowbinary)                                                                 | ✔     | ✔      |
 | [RowBinaryWithNamesAndTypes](#rowbinarywithnamesandtypes)                               | ✔     | ✔      |
@@ -58,7 +58,7 @@ ClickHouse可以接受和返回各种格式的数据。受支持的输入格式�
 | [XML](#xml)                                                                             | ✗     | ✔      |
 | [CapnProto](#capnproto)                                                                 | ✔     | ✗      |
 | [LineAsString](#lineasstring)                                                           | ✔     | ✗      |
-| [Regexp](#data-format-regexp)                                                           | ✔     | ✗      |
+| [Regexp](#regexp)                                                           | ✔     | ✗      |
 | [RawBLOB](#rawblob)                                                                     | ✔     | ✔      |
 
 
@@ -685,8 +685,9 @@ CREATE TABLE IF NOT EXISTS example_table
 -   如果`input_format_defaults_for_omitted_fields = 0`, 那么`x`和`a`的默认值等于`0`(作为`UInt32`数据类型的默认值)。
 -   如果`input_format_defaults_for_omitted_fields = 1`, 那么`x`的默认值为`0`，但`a`的默认值为`x * 2`。
 
-!!! note "注意"
+:::warning
 当使用`input_format_defaults_for_omitted_fields = 1`插入数据时，与使用`input_format_defaults_for_omitted_fields = 0`相比，ClickHouse消耗更多的计算资源。
+:::
 
 ### Selecting Data {#selecting-data}
 
@@ -708,8 +709,9 @@ CREATE TABLE IF NOT EXISTS example_table
 
 与[JSON](#json)格式不同，没有替换无效的UTF-8序列。值以与`JSON`相同的方式转义。
 
-!!! note "提示"
+:::info
 字符串中可以输出任意一组字节。如果您确信表中的数据可以被格式化为JSON而不会丢失任何信息，那么就使用`JSONEachRow`格式。
+:::
 
 ### Nested Structures {#jsoneachrow-nested}
 
@@ -932,7 +934,7 @@ FixedString 被简单地表示为字节序列。
 
 这是 `INSERT INTO t VALUES ...` 中可以使用的格式，但您也可以将其用于查询结果。
 
-另见：[input_format_values_interpret_expressions](https://clickhouse.com/docs/en/operations/settings/settings/#settings-input_format_values_interpret_expressions)和[input_format_values_deduce_templates_of_expressions](https://clickhouse.com/docs/en/operations/settings/settings/#settings-input_format_values_deduce_templates_of_expressions)。
+另见：[input_format_values_interpret_expressions](/operations/settings/settings/#settings-input_format_values_interpret_expressions)和[input_format_values_deduce_templates_of_expressions](/operations/settings/settings/#settings-input_format_values_deduce_templates_of_expressions)。
 
 ## Vertical {#vertical}
 
@@ -1037,10 +1039,12 @@ SELECT SearchPhrase, count() AS c FROM test.hits
 
 其中 `schema.capnp` 描述如下：6y2
 
+```
     struct Message {
       SearchPhrase @0 :Text;
       c @1 :Uint64;
     }
+```
 
 格式文件存储的目录可以在服务配置中的 [format_schema_path](../operations/server-configuration-parameters/settings.md) 指定。
 
@@ -1110,13 +1114,17 @@ ClickHouse在输入和输出protobuf消息采用`length-delimited` 格式。
 这意味着每个消息之前，应该写它的长度作为一个 [varint](https://developers.google.com/protocol-buffers/docs/encoding#varints).
 另请参阅 [如何在流行语言中读取/写入长度分隔的protobuf消息](https://cwiki.apache.org/confluence/display/GEODE/Delimiting+Protobuf+Messages).
 
+## ProtobufSingle
+
+与 [Protobuf](#protobuf) 相同，但用于存储/解析单个 Protobuf 消息而无需长度定界符。
+
 ## Avro {#data-format-avro}
 
 [Apache Avro](http://avro.apache.org/) 是在Apache Hadoop项目中开发的面向行的数据序列化框架。
 
 ClickHouse Avro格式支持读取和写入 [Avro数据文件](http://avro.apache.org/docs/current/spec.html#Object+Container+Files).
 
-### 数据类型匹配{#sql_reference/data_types-matching} {#data-types-matching-sql_referencedata_types-matching}
+### 数据类型匹配{#data_types-matching}
 
 下表显示了支持的数据类型以及它们如何匹配ClickHouse [数据类型](../sql-reference/data-types/index.md) 在 `INSERT` 和 `SELECT` 查询。
 
@@ -1181,7 +1189,7 @@ AvroConfluent支持解码单个对象的Avro消息，这常用于 [Kafka](https:
 
 架构注册表URL配置为 [format_avro_schema_registry_url](../operations/settings/settings.md#settings-format_avro_schema_registry_url)
 
-### 数据类型匹配{#sql_reference/data_types-matching-1} {#data-types-matching-sql_referencedata_types-matching-1}
+### 数据类型匹配 {#data-types-matching-sql_reference}
 
 和 [Avro](#data-format-avro)相同。
 
@@ -1216,15 +1224,15 @@ SET format_avro_schema_registry_url = 'http://schema-registry';
 SELECT * FROM topic1_stream;
 ```
 
-!!! note "警告"
-    设置 `format_avro_schema_registry_url` 需要写入配置文件`users.xml`以在Clickhouse重启后，该设置仍为您的设定值。您也可以在使用Kafka引擎的时候指定该设置。
-
+:::warning
+设置 `format_avro_schema_registry_url` 需要写入配置文件`users.xml`以在Clickhouse重启后，该设置仍为您的设定值。您也可以在使用Kafka引擎的时候指定该设置。
+:::
 
 ## Parquet {#data-format-parquet}
 
 [Apache Parquet](http://parquet.apache.org/) 是Hadoop生态系统中普遍使用的列式存储格式。 ClickHouse支持此格式的读写操作。
 
-### 数据类型匹配{#sql_reference/data_types-matching-2} {#data-types-matching-sql_referencedata_types-matching-2}
+### 数据类型匹配 {#data-types-matching-sql_reference}
 
 下表显示了Clickhouse支持的数据类型以及它们在 `INSERT` 和 `SELECT` 查询如何对应Clickhouse的 [data types](../sql-reference/data-types/index.md) 。
 
@@ -1280,7 +1288,7 @@ $ clickhouse-client --query="SELECT * FROM {some_table} FORMAT Parquet" > {some_
 ## ORC {#data-format-orc}
 [Apache ORC](https://orc.apache.org/) 是Hadoop生态系统中普遍存在的列式存储格式。
 
-### 数据类型匹配{#sql_reference/data_types-matching-3} {#data-types-matching-sql_referencedata_types-matching-3}
+### 数据类型匹配 {#data-types-matching-sql_reference}
 
 下表显示了支持的数据类型以及它们如何在`SELECT`与`INSERT`查询中匹配ClickHouse的 [数据类型](../sql-reference/data-types/index.md)。
 
@@ -1328,7 +1336,7 @@ $ clickhouse-client --query="SELECT * FROM {some_table} FORMAT ORC" > {filename.
 要与Hadoop交换数据，您可以使用 [HDFS表引擎](../engines/table-engines/integrations/hdfs.md).
 
 ## LineAsString {#lineasstring}
-这种格式下，每行输入数据都会当做一个字符串。这种格式仅适用于仅有一列[String](https://clickhouse.com/docs/en/sql-reference/data-types/string/)类型的列的表。其余列必须设置为[DEFAULT](https://clickhouse.com/docs/en/sql-reference/statements/create/table/#default)、[MATERIALIZED](https://clickhouse.com/docs/en/sql-reference/statements/create/table/#materialized)或者被忽略。
+这种格式下，每行输入数据都会当做一个字符串。这种格式仅适用于仅有一列[String](/sql-reference/data-types/string/)类型的列的表。其余列必须设置为[DEFAULT](/sql-reference/statements/create/table/#default)、[MATERIALIZED](/sql-reference/statements/create/table/#materialized)或者被忽略。
 
 ### 示例：
 查询如下：
@@ -1347,8 +1355,8 @@ SELECT * FROM line_as_string;
 ## Regexp {#regexp}
 每一列输入数据根据正则表达式解析。使用`Regexp`格式时，可以使用如下设置：
 
--  `format_regexp`，[String](https://clickhouse.com/docs/en/sql-reference/data-types/string/)类型。包含[re2](https://github.com/google/re2/wiki/Syntax)格式的正则表达式。
-- `format_regexp_escaping_rule`，[String](https://clickhouse.com/docs/en/sql-reference/data-types/string/)类型。支持如下转义规则：
+-  `format_regexp`，[String](/sql-reference/data-types/string/)类型。包含[re2](https://github.com/google/re2/wiki/Syntax)格式的正则表达式。
+- `format_regexp_escaping_rule`，[String](/sql-reference/data-types/string/)类型。支持如下转义规则：
   - CSV(规则相同于[CSV](https://clickhouse.com/docs/zh/interfaces/formats/#csv))
   - JSON(相同于[JSONEachRow](https://clickhouse.com/docs/zh/interfaces/formats/#jsoneachrow))
   - Escaped(相同于[TSV](https://clickhouse.com/docs/zh/interfaces/formats/#tabseparated))
@@ -1453,7 +1461,3 @@ f9725a22f9191e064120d718e26862a9  -
 限制:
 - 在解析错误的情况下 `JSONEachRow` 跳过该行的所有数据，直到遇到新行(或EOF)，所以行必须由换行符分隔以正确统计错误行的数量。
 - `Template` 和 `CustomSeparated` 在最后一列之后和行之间使用分隔符来查找下一行的开头，所以跳过错误只有在行分隔符和列分隔符其中至少有一个不为空时才有效。
-
-
-
-[来源文章](https://clickhouse.com/docs/zh/interfaces/formats/) <!--hide-->

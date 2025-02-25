@@ -2,7 +2,6 @@
 
 #include <Interpreters/ExpressionActions.h>
 #include <Processors/ISimpleTransform.h>
-#include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Transforms/FilterTransform.h>
 
 namespace DB
@@ -27,6 +26,9 @@ public:
             true)
         , filter_transform(header_, expression_, filter_column_name_, remove_filter_column_, on_totals_)
     {
+        assertBlocksHaveEqualStructure(
+            header_, getOutputPort().getHeader(),
+            "Expression for FilterSortedStreamByRange should not change header");
     }
 
     String getName() const override { return "FilterSortedStreamByRange"; }

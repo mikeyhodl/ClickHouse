@@ -12,9 +12,9 @@ struct MultiEnum
 
     MultiEnum() = default;
 
-    template <typename ... EnumValues, typename = std::enable_if_t<std::conjunction_v<std::is_same<EnumTypeT, EnumValues>...>>>
-    constexpr explicit MultiEnum(EnumValues ... v)
-        : MultiEnum((toBitFlag(v) | ... | 0u))
+    template <typename... EnumValues>
+    requires std::conjunction_v<std::is_same<EnumTypeT, EnumValues>...>
+    constexpr explicit MultiEnum(EnumValues... v) : MultiEnum((toBitFlag(v) | ... | 0u))
     {}
 
     template <typename ValueType>
@@ -39,7 +39,7 @@ struct MultiEnum
         bitset |= toBitFlag(value);
     }
 
-    void unSet(EnumType value)
+    void unset(EnumType value)
     {
         bitset &= ~(toBitFlag(value));
     }

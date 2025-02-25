@@ -1,6 +1,7 @@
 #include <Common/typeid_cast.h>
 #include <Common/assert_cast.h>
 #include <Columns/FilterDescription.h>
+#include <Columns/ColumnsCommon.h>
 #include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnConst.h>
@@ -32,11 +33,12 @@ ConstantFilterDescription::ConstantFilterDescription(const IColumn & column)
 
         if (!typeid_cast<const ColumnUInt8 *>(column_nested.get()))
         {
-            const ColumnNullable * column_nested_nullable = checkAndGetColumn<ColumnNullable>(*column_nested);
+            const ColumnNullable * column_nested_nullable = checkAndGetColumn<ColumnNullable>(&*column_nested);
             if (!column_nested_nullable || !typeid_cast<const ColumnUInt8 *>(&column_nested_nullable->getNestedColumn()))
             {
-                throw Exception("Illegal type " + column_nested->getName() + " of column for constant filter. Must be UInt8 or Nullable(UInt8).",
-                                ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER,
+                                "Illegal type {} of column for constant filter. Must be UInt8 or Nullable(UInt8).",
+                                column_nested->getName());
             }
         }
 
@@ -65,31 +67,59 @@ FilterDescription::FilterDescription(const IColumn & column_)
         return;
     }
 
-    if (const auto * nullable_column = checkAndGetColumn<ColumnNullable>(column))
+    if (const auto * nullable_column = checkAndGetColumn<ColumnNullable>(&column))
     {
         ColumnPtr nested_column = nullable_column->getNestedColumnPtr();
         MutableColumnPtr mutable_holder = IColumn::mutate(std::move(nested_column));
 
         ColumnUInt8 * concrete_column = typeid_cast<ColumnUInt8 *>(mutable_holder.get());
         if (!concrete_column)
-            throw Exception("Illegal type " + column.getName() + " of column for filter. Must be UInt8 or Nullable(UInt8).",
-                ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER,
+                "Illegal type {} of column for filter. Must be UInt8 or Nullable(UInt8).", column.getName());
 
         const NullMap & null_map = nullable_column->getNullMapData();
         IColumn::Filter & res = concrete_column->getData();
 
-        size_t size = res.size();
+        const auto size = res.size();
+        assert(size == null_map.size());
         for (size_t i = 0; i < size; ++i)
-            res[i] = res[i] && !null_map[i];
+        {
+            auto has_val = static_cast<UInt8>(!!res[i]);
+            auto not_null = static_cast<UInt8>(!null_map[i]);
+            /// Instead of the logical AND operator(&&), the bitwise one(&) is utilized for the auto vectorization.
+            res[i] = has_val & not_null;
+        }
 
         data = &res;
         data_holder = std::move(mutable_holder);
         return;
     }
 
-    throw Exception("Illegal type " + column.getName() + " of column for filter. Must be UInt8 or Nullable(UInt8) or Const variants of them.",
-        ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER);
+    throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER,
+        "Illegal type {} of column for filter. Must be UInt8 or Nullable(UInt8) or Const variants of them.",
+        column.getName());
 }
+
+ColumnPtr FilterDescription::filter(const IColumn & column, ssize_t result_size_hint) const
+{
+    return column.filter(*data, result_size_hint);
+}
+
+size_t FilterDescription::countBytesInFilter() const
+{
+    return DB::countBytesInFilter(*data);
+}
+
+ColumnPtr SparseFilterDescription::filter(const IColumn & column, ssize_t) const
+{
+    return column.index(*filter_indices, 0);
+}
+
+size_t SparseFilterDescription::countBytesInFilter() const
+{
+    return filter_indices->size();
+}
+
 
 SparseFilterDescription::SparseFilterDescription(const IColumn & column)
 {
@@ -98,7 +128,7 @@ SparseFilterDescription::SparseFilterDescription(const IColumn & column)
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER,
             "Illegal type {} of column for sparse filter. Must be Sparse(UInt8)", column.getName());
 
-    filter_indices = &column_sparse->getOffsetsColumn();
+    filter_indices = &assert_cast<const ColumnUInt64 &>(column_sparse->getOffsetsColumn());
 }
 
 }

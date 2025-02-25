@@ -1,4 +1,5 @@
 -- Tags: no-fasttest
+-- Tag: no-fasttest due to only SIMD JSON is available in fasttest
 
 SELECT '--allow_simdjson=1--';
 SET allow_simdjson=1;
@@ -27,6 +28,7 @@ SELECT JSONKey('{"a": "hello", "b": [-100, 200.0, 300]}', -2);
 SELECT '--JSONType--';
 SELECT JSONType('{"a": "hello", "b": [-100, 200.0, 300]}');
 SELECT JSONType('{"a": "hello", "b": [-100, 200.0, 300]}', 'b');
+SELECT JSONType('{"a": true}', 'a');
 
 SELECT '--JSONExtract<numeric>--';
 SELECT JSONExtractInt('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 1);
@@ -34,6 +36,7 @@ SELECT JSONExtractFloat('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 2);
 SELECT JSONExtractUInt('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', -1);
 SELECT JSONExtractBool('{"passed": true}', 'passed');
 SELECT JSONExtractBool('"HX-=');
+SELECT JSONExtractBool('-1');
 
 SELECT '--JSONExtractString--';
 SELECT JSONExtractString('{"a": "hello", "b": [-100, 200.0, 300]}', 'a');
@@ -53,11 +56,14 @@ SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Float3
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Tuple(Int8, Float32, UInt16)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Int8)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Nullable(Int8))');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(LowCardinality(Nullable(Int8)))');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(UInt8)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Nullable(UInt8))');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(LowCardinality(Nullable(UInt8)))');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 1, 'Int8');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 2, 'Int32');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 4, 'Nullable(Int64)');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 4, 'LowCardinality(Nullable(Int64))');
 SELECT JSONExtract('{"passed": true}', 'passed', 'UInt8');
 SELECT JSONExtract('{"day": "Thursday"}', 'day', 'Enum8(\'Sunday\' = 0, \'Monday\' = 1, \'Tuesday\' = 2, \'Wednesday\' = 3, \'Thursday\' = 4, \'Friday\' = 5, \'Saturday\' = 6)');
 SELECT JSONExtract('{"day": 5}', 'day', 'Enum8(\'Sunday\' = 0, \'Monday\' = 1, \'Tuesday\' = 2, \'Wednesday\' = 3, \'Thursday\' = 4, \'Friday\' = 5, \'Saturday\' = 6)');
@@ -114,6 +120,19 @@ SELECT JSONExtract('{"a":"1234567890123456789999"}', 'a', 'UInt64') as a, toType
 SELECT JSONExtract('{"a":0}', 'a', 'Bool') as a, toTypeName(a);
 SELECT JSONExtract('{"a":1}', 'a', 'Bool') as a, toTypeName(a);
 
+SELECT JSONExtract('{"a": "-123456789012.345"}', 'a', 'Int64') as a, toTypeName(a);
+SELECT JSONExtract('{"a": "123456789012.345"}', 'a', 'UInt64') as a, toTypeName(a);
+
+SELECT JSONExtract('{"a": "-2000.22"}', 'a', 'UInt64') as a, toTypeName(a);
+SELECT JSONExtract('{"a": "-2000.22"}', 'a', 'Int8') as a, toTypeName(a);
+
+SELECT JSONExtract('{"a": "hello", "b": "world"}', 'Map(String, String)');
+SELECT JSONExtract('{"a": "hello", "b": "world"}', 'Map(LowCardinality(String), String)');
+SELECT JSONExtract('{"a": ["hello", 100.0], "b": ["world", 200]}', 'Map(String, Tuple(String, Float64))');
+SELECT JSONExtract('{"a": [100.0, 200], "b": [-100, 200.0, 300]}', 'Map(String, Array(Float64))');
+SELECT JSONExtract('{"a": {"c": "hello"}, "b": {"d": "world"}}', 'Map(String, Map(String, String))');
+SELECT JSONExtract('{"a": {"c": "hello"}, "b": {"d": "world"}}', 'a',  'Map(String, String)');
+
 SELECT '--JSONExtractKeysAndValues--';
 SELECT JSONExtractKeysAndValues('{"a": "hello", "b": [-100, 200.0, 300]}', 'String');
 SELECT JSONExtractKeysAndValues('{"a": "hello", "b": [-100, 200.0, 300]}', 'Array(Float64)');
@@ -157,8 +176,11 @@ SELECT JSONExtractString('["a", "b", "c", "d", "e"]', idx) FROM (SELECT arrayJoi
 SELECT JSONExtractString(json, 's') FROM (SELECT arrayJoin(['{"s":"u"}', '{"s":"v"}']) AS json);
 
 SELECT '--show error: type should be const string';
-SELECT JSONExtractKeysAndValues([], JSONLength('^?V{LSwp')); -- { serverError 44 }
-WITH '{"i": 1, "f": 1.2}' AS json SELECT JSONExtract(json, 'i', JSONType(json, 'i')); -- { serverError 44 }
+SELECT JSONExtractKeysAndValues([], JSONLength('^?V{LSwp')); -- { serverError ILLEGAL_COLUMN }
+WITH '{"i": 1, "f": 1.2}' AS json SELECT JSONExtract(json, 'i', JSONType(json, 'i')); -- { serverError ILLEGAL_COLUMN }
+
+SELECT '--show error: key of map type should be String';
+SELECT JSONExtract('{"a": [100.0, 200], "b": [-100, 200.0, 300]}', 'Map(Int64, Array(Float64))'); -- { serverError ILLEGAL_TYPE_OF_ARGUMENT }
 
 
 SELECT '--allow_simdjson=0--';
@@ -188,6 +210,7 @@ SELECT JSONKey('{"a": "hello", "b": [-100, 200.0, 300]}', -2);
 SELECT '--JSONType--';
 SELECT JSONType('{"a": "hello", "b": [-100, 200.0, 300]}');
 SELECT JSONType('{"a": "hello", "b": [-100, 200.0, 300]}', 'b');
+SELECT JSONType('{"a": true}', 'a');
 
 SELECT '--JSONExtract<numeric>--';
 SELECT JSONExtractInt('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 1);
@@ -195,6 +218,13 @@ SELECT JSONExtractFloat('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 2);
 SELECT JSONExtractUInt('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', -1);
 SELECT JSONExtractBool('{"passed": true}', 'passed');
 SELECT JSONExtractBool('"HX-=');
+SELECT JSONExtractBool('-1');
+
+SELECT JSONExtract('{"a": "-123456789012.345"}', 'a', 'Int64') as a, toTypeName(a);
+SELECT JSONExtract('{"a": "123456789012.345"}', 'a', 'UInt64') as a, toTypeName(a);
+
+SELECT JSONExtract('{"a": "-2000.22"}', 'a', 'UInt64') as a, toTypeName(a);
+SELECT JSONExtract('{"a": "-2000.22"}', 'a', 'Int8') as a, toTypeName(a);
 
 SELECT '--JSONExtractString--';
 SELECT JSONExtractString('{"a": "hello", "b": [-100, 200.0, 300]}', 'a');
@@ -214,11 +244,14 @@ SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Float3
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Tuple(Int8, Float32, UInt16)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Int8)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Nullable(Int8))');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(LowCardinality(Nullable(Int8)))');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(UInt8)');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(Nullable(UInt8))');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 'Array(LowCardinality(Nullable(UInt8)))');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 1, 'Int8');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 2, 'Int32');
 SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 4, 'Nullable(Int64)');
+SELECT JSONExtract('{"a": "hello", "b": [-100, 200.0, 300]}', 'b', 4, 'LowCardinality(Nullable(Int64))');
 SELECT JSONExtract('{"passed": true}', 'passed', 'UInt8');
 SELECT JSONExtract('{"day": "Thursday"}', 'day', 'Enum8(\'Sunday\' = 0, \'Monday\' = 1, \'Tuesday\' = 2, \'Wednesday\' = 3, \'Thursday\' = 4, \'Friday\' = 5, \'Saturday\' = 6)');
 SELECT JSONExtract('{"day": 5}', 'day', 'Enum8(\'Sunday\' = 0, \'Monday\' = 1, \'Tuesday\' = 2, \'Wednesday\' = 3, \'Thursday\' = 4, \'Friday\' = 5, \'Saturday\' = 6)');
@@ -229,6 +262,13 @@ SELECT JSONExtract('{"a":3,"b":5,"c":7}', 'Tuple(Int, Int)');
 SELECT JSONExtract('{"a":3}', 'Tuple(Int, Int)');
 SELECT JSONExtract('[3,5,7]', 'Tuple(Int, Int)');
 SELECT JSONExtract('[3]', 'Tuple(Int, Int)');
+
+SELECT JSONExtract('{"a": "hello", "b": "world"}', 'Map(String, String)');
+SELECT JSONExtract('{"a": "hello", "b": "world"}', 'Map(LowCardinality(String), String)');
+SELECT JSONExtract('{"a": ["hello", 100.0], "b": ["world", 200]}', 'Map(String, Tuple(String, Float64))');
+SELECT JSONExtract('{"a": [100.0, 200], "b": [-100, 200.0, 300]}', 'Map(String, Array(Float64))');
+SELECT JSONExtract('{"a": {"c": "hello"}, "b": {"d": "world"}}', 'Map(String, Map(String, String))');
+SELECT JSONExtract('{"a": {"c": "hello"}, "b": {"d": "world"}}', 'a',  'Map(String, String)');
 
 SELECT '--JSONExtractKeysAndValues--';
 SELECT JSONExtractKeysAndValues('{"a": "hello", "b": [-100, 200.0, 300]}', 'String');
@@ -278,8 +318,17 @@ SELECT JSONExtractString('["a", "b", "c", "d", "e"]', idx) FROM (SELECT arrayJoi
 SELECT JSONExtractString(json, 's') FROM (SELECT arrayJoin(['{"s":"u"}', '{"s":"v"}']) AS json);
 
 SELECT '--show error: type should be const string';
-SELECT JSONExtractKeysAndValues([], JSONLength('^?V{LSwp')); -- { serverError 44 }
-WITH '{"i": 1, "f": 1.2}' AS json SELECT JSONExtract(json, 'i', JSONType(json, 'i')); -- { serverError 44 }
+SELECT JSONExtractKeysAndValues([], JSONLength('^?V{LSwp')); -- { serverError ILLEGAL_COLUMN }
+WITH '{"i": 1, "f": 1.2}' AS json SELECT JSONExtract(json, 'i', JSONType(json, 'i')); -- { serverError ILLEGAL_COLUMN }
 
 SELECT '--show error: index type should be integer';
-SELECT JSONExtract('[]', JSONExtract('0', 'UInt256'), 'UInt256'); -- { serverError 43 }
+SELECT JSONExtract('[]', JSONExtract('0', 'UInt256'), 'UInt256'); -- { serverError ILLEGAL_TYPE_OF_ARGUMENT }
+
+SELECT '--show error: key of map type should be String';
+SELECT JSONExtract('{"a": [100.0, 200], "b": [-100, 200.0, 300]}', 'Map(Int64, Array(Float64))'); -- { serverError ILLEGAL_TYPE_OF_ARGUMENT }
+SELECT JSONExtract(materialize(toLowCardinality('{"string_value":null}')), materialize('string_value'), 'LowCardinality(Nullable(String))');
+SELECT JSONExtract(materialize('{"string_value":null}'), materialize('string_value'), 'LowCardinality(Nullable(String))');
+SELECT JSONExtract(materialize('{"string_value":"Hello"}'), materialize('string_value'), 'LowCardinality(Nullable(String))') AS x;
+SELECT JSONExtract(materialize(toLowCardinality('{"string_value":"Hello"}')), materialize('string_value'), 'LowCardinality(Nullable(String))') AS x;
+SELECT JSONExtract(materialize('{"string_value":"Hello"}'), materialize(toLowCardinality('string_value')), 'LowCardinality(Nullable(String))') AS x;
+SELECT JSONExtract(materialize(toLowCardinality('{"string_value":"Hello"}')), materialize(toLowCardinality('string_value')), 'LowCardinality(Nullable(String))') AS x;

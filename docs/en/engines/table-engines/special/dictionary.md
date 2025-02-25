@@ -1,12 +1,14 @@
 ---
-slug: /en/engines/table-engines/special/dictionary
+slug: /engines/table-engines/special/dictionary
 sidebar_position: 20
 sidebar_label: Dictionary
+title: "Dictionary Table Engine"
+description: "The `Dictionary` engine displays the dictionary data as a ClickHouse table."
 ---
 
 # Dictionary Table Engine
 
-The `Dictionary` engine displays the [dictionary](../../../sql-reference/dictionaries/external-dictionaries/external-dicts.md) data as a ClickHouse table.
+The `Dictionary` engine displays the [dictionary](../../../sql-reference/dictionaries/index.md) data as a ClickHouse table.
 
 ## Example {#example}
 
@@ -67,7 +69,7 @@ WHERE name = 'products'
 
 You can use the [dictGet\*](../../../sql-reference/functions/ext-dict-functions.md#ext_dict_functions) function to get the dictionary data in this format.
 
-This view isn’t helpful when you need to get raw data, or when performing a `JOIN` operation. For these cases, you can use the `Dictionary` engine, which displays the dictionary data in a table.
+This view isn't helpful when you need to get raw data, or when performing a `JOIN` operation. For these cases, you can use the `Dictionary` engine, which displays the dictionary data in a table.
 
 Syntax:
 
@@ -83,7 +85,7 @@ create table products (product_id UInt64, title String) Engine = Dictionary(prod
 
       Ok
 
-Take a look at what’s in the table.
+Take a look at what's in the table.
 
 ``` sql
 select * from products limit 1;
@@ -97,6 +99,4 @@ select * from products limit 1;
 
 **See Also**
 
--   [Dictionary function](../../../sql-reference/table-functions/dictionary.md#dictionary-function)
-
-[Original article](https://clickhouse.com/docs/en/engines/table-engines/special/dictionary/) <!--hide-->
+- [Dictionary function](../../../sql-reference/table-functions/dictionary.md#dictionary-function)

@@ -1,18 +1,12 @@
 #pragma once
 
-#include <IO/ReadBuffer.h>
-#include <IO/WriteBuffer.h>
-#include <IO/ReadBufferFromString.h>
-#include <IO/ReadHelpers.h>
-#include <IO/WriteBufferFromString.h>
-#include <IO/WriteHelpers.h>
 #include <Common/ActionBlocker.h>
+#include <Common/Exception.h>
+#include <Common/SharedMutex.h>
 #include <base/types.h>
 
-#include <atomic>
 #include <map>
-#include <shared_mutex>
-#include <utility>
+#include <mutex>
 
 namespace zkutil
 {
@@ -43,7 +37,7 @@ public:
 
     /// You need to stop the data transfer if blocker is activated.
     ActionBlocker blocker;
-    std::shared_mutex rwlock;
+    SharedMutex rwlock;
 };
 
 using InterserverIOEndpointPtr = std::shared_ptr<InterserverIOEndpoint>;
@@ -60,7 +54,7 @@ public:
         std::lock_guard lock(mutex);
         bool inserted = endpoint_map.try_emplace(name, std::move(endpoint)).second;
         if (!inserted)
-            throw Exception("Duplicate interserver IO endpoint: " + name, ErrorCodes::DUPLICATE_INTERSERVER_IO_ENDPOINT);
+            throw Exception(ErrorCodes::DUPLICATE_INTERSERVER_IO_ENDPOINT, "Duplicate interserver IO endpoint: {}", name);
     }
 
     bool removeEndpointIfExists(const String & name)
@@ -77,7 +71,7 @@ public:
     }
     catch (...)
     {
-        throw Exception("No interserver IO endpoint named " + name, ErrorCodes::NO_SUCH_INTERSERVER_IO_ENDPOINT);
+        throw Exception(ErrorCodes::NO_SUCH_INTERSERVER_IO_ENDPOINT, "No interserver IO endpoint named {}", name);
     }
 
 private:

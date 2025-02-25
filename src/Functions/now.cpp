@@ -1,20 +1,25 @@
-#include <DataTypes/DataTypeDateTime.h>
-
-#include <Functions/IFunction.h>
-#include <Core/DecimalFunctions.h>
-#include <Functions/FunctionFactory.h>
-
-#include <Functions/extractTimeZoneFromFunctionArguments.h>
-
 #include <ctime>
-
+#include <Core/Field.h>
+#include <Core/DecimalFunctions.h>
+#include <Core/Settings.h>
+#include <DataTypes/DataTypeDateTime.h>
+#include <Functions/FunctionFactory.h>
+#include <Functions/IFunction.h>
+#include <Functions/extractTimeZoneFromFunctionArguments.h>
+#include <Interpreters/Context.h>
 
 namespace DB
 {
+namespace Setting
+{
+    extern const SettingsBool allow_nonconst_timezone_arguments;
+}
+
 namespace ErrorCodes
 {
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
+    extern const int CANNOT_CLOCK_GETTIME;
 }
 
 namespace
@@ -62,9 +67,15 @@ public:
         return std::make_unique<ExecutableFunctionNow>(time_value);
     }
 
-    bool isDeterministic() const override { return false; }
-    bool isDeterministicInScopeOfQuery() const override { return true; }
-    bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return false; }
+    bool isDeterministic() const override
+    {
+        return false;
+    }
+
+    bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo &) const override
+    {
+        return false;
+    }
 
 private:
     time_t time_value;
@@ -84,22 +95,25 @@ public:
     bool isVariadic() const override { return true; }
 
     size_t getNumberOfArguments() const override { return 0; }
-    static FunctionOverloadResolverPtr create(ContextPtr) { return std::make_unique<NowOverloadResolver>(); }
+    static FunctionOverloadResolverPtr create(ContextPtr context) { return std::make_unique<NowOverloadResolver>(context); }
+    explicit NowOverloadResolver(ContextPtr context)
+        : allow_nonconst_timezone_arguments(context->getSettingsRef()[Setting::allow_nonconst_timezone_arguments])
+    {}
 
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
         if (arguments.size() > 1)
         {
-            throw Exception("Arguments size of function " + getName() + " should be 0 or 1", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Arguments size of function {} should be 0 or 1", getName());
         }
         if (arguments.size() == 1 && !isStringOrFixedString(arguments[0].type))
         {
-            throw Exception(
-                "Arguments of function " + getName() + " should be String or FixedString", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Arguments of function {} should be String or FixedString",
+                getName());
         }
         if (arguments.size() == 1)
         {
-            return std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 0, 0));
+            return std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 0, 0, allow_nonconst_timezone_arguments));
         }
         return std::make_shared<DataTypeDateTime>();
     }
@@ -108,27 +122,35 @@ public:
     {
         if (arguments.size() > 1)
         {
-            throw Exception("Arguments size of function " + getName() + " should be 0 or 1", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, "Arguments size of function {} should be 0 or 1", getName());
         }
         if (arguments.size() == 1 && !isStringOrFixedString(arguments[0].type))
         {
-            throw Exception(
-                "Arguments of function " + getName() + " should be String or FixedString", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Arguments of function {} should be String or FixedString",
+                getName());
         }
+
+        timespec spec{};
+        if (clock_gettime(CLOCK_REALTIME, &spec))
+            throw ErrnoException(ErrorCodes::CANNOT_CLOCK_GETTIME, "Cannot clock_gettime");
+
         if (arguments.size() == 1)
             return std::make_unique<FunctionBaseNow>(
-                time(nullptr), DataTypes{arguments.front().type},
-                std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 0, 0)));
+                spec.tv_sec, DataTypes{arguments.front().type},
+                std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 0, 0, allow_nonconst_timezone_arguments)));
 
-        return std::make_unique<FunctionBaseNow>(time(nullptr), DataTypes(), std::make_shared<DataTypeDateTime>());
+        return std::make_unique<FunctionBaseNow>(spec.tv_sec, DataTypes(), std::make_shared<DataTypeDateTime>());
     }
+private:
+    const bool allow_nonconst_timezone_arguments;
 };
 
 }
 
 REGISTER_FUNCTION(Now)
 {
-    factory.registerFunction<NowOverloadResolver>({}, FunctionFactory::CaseInsensitive);
+    factory.registerFunction<NowOverloadResolver>({}, FunctionFactory::Case::Insensitive);
+    factory.registerAlias("current_timestamp", NowOverloadResolver::name, FunctionFactory::Case::Insensitive);
 }
 
 }
