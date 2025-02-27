@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
-import os
-import logging
 import argparse
 import csv
+import logging
+import os
 
 
 def process_result(result_folder):
@@ -16,7 +16,6 @@ def process_result(result_folder):
         "TLPGroupBy",
         "TLPHaving",
         "TLPWhere",
-        "TLPWhereGroupBy",
         "NoREC",
     ]
     failed_tests = []

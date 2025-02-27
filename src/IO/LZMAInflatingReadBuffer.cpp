@@ -1,4 +1,5 @@
 #include <IO/LZMAInflatingReadBuffer.h>
+#include <IO/WithFileName.h>
 
 namespace DB
 {
@@ -74,22 +75,22 @@ bool LZMAInflatingReadBuffer::nextImpl()
             eof_flag = true;
             return !working_buffer.empty();
         }
-        else
-        {
-            throw Exception(
-                ErrorCodes::LZMA_STREAM_DECODER_FAILED,
-                "lzma decoder finished, but input stream has not exceeded: error code: {}; lzma version: {}",
-                ret,
-                LZMA_VERSION_STRING);
-        }
+
+        throw Exception(
+            ErrorCodes::LZMA_STREAM_DECODER_FAILED,
+            "lzma decoder finished, but input stream has not exceeded: error code: {}; lzma version: {}{}",
+            ret,
+            LZMA_VERSION_STRING,
+            getExceptionEntryWithFileName(*in));
     }
 
     if (ret != LZMA_OK)
         throw Exception(
             ErrorCodes::LZMA_STREAM_DECODER_FAILED,
-            "lzma_stream_decoder failed: error code: error codeL {}; lzma version: {}",
+            "lzma_stream_decoder failed: error code: error code {}; lzma version: {}{}",
             ret,
-            LZMA_VERSION_STRING);
+            LZMA_VERSION_STRING,
+            getExceptionEntryWithFileName(*in));
 
     return true;
 }

@@ -15,10 +15,19 @@ namespace DB
 class NativeInputFormat final : public IInputFormat
 {
 public:
-    NativeInputFormat(ReadBuffer & buf, const Block & header_, const FormatSettings & settings)
-        : IInputFormat(header_, buf)
-        , reader(std::make_unique<NativeReader>(buf, header_, 0, settings.skip_unknown_fields))
-        , header(header_) {}
+    NativeInputFormat(ReadBuffer & buf, const Block & header_, const FormatSettings & settings_)
+        : IInputFormat(header_, &buf)
+        , reader(std::make_unique<NativeReader>(
+              buf,
+              header_,
+              0,
+              settings_,
+              settings_.defaults_for_omitted_fields ? &block_missing_values : nullptr))
+        , header(header_)
+        , block_missing_values(header.columns())
+        , settings(settings_)
+        {
+        }
 
     String getName() const override { return "Native"; }
 
@@ -28,9 +37,13 @@ public:
         reader->resetParser();
     }
 
-    Chunk generate() override
+    Chunk read() override
     {
+        block_missing_values.clear();
+        size_t block_start = getDataOffsetMaybeCompressed(*in);
         auto block = reader->read();
+        approx_bytes_read_for_chunk = getDataOffsetMaybeCompressed(*in) - block_start;
+
         if (!block)
             return {};
 
@@ -43,21 +56,28 @@ public:
 
     void setReadBuffer(ReadBuffer & in_) override
     {
-        reader = std::make_unique<NativeReader>(in_, header, 0);
+        reader = std::make_unique<NativeReader>(in_, header, 0, settings, settings.defaults_for_omitted_fields ? &block_missing_values : nullptr);
         IInputFormat::setReadBuffer(in_);
     }
+
+    const BlockMissingValues * getMissingValues() const override { return &block_missing_values; }
+
+    size_t getApproxBytesReadForChunk() const override { return approx_bytes_read_for_chunk; }
 
 private:
     std::unique_ptr<NativeReader> reader;
     Block header;
+    BlockMissingValues block_missing_values;
+    const FormatSettings settings;
+    size_t approx_bytes_read_for_chunk = 0;
 };
 
 class NativeOutputFormat final : public IOutputFormat
 {
 public:
-    NativeOutputFormat(WriteBuffer & buf, const Block & header)
+    NativeOutputFormat(WriteBuffer & buf, const Block & header, const FormatSettings & settings, UInt64 client_protocol_version = 0)
         : IOutputFormat(header, buf)
-        , writer(buf, 0, header)
+        , writer(buf, client_protocol_version, header, settings)
     {
     }
 
@@ -65,7 +85,7 @@ public:
 
     std::string getContentType() const override
     {
-        return writer.getContentType();
+        return NativeWriter::getContentType();
     }
 
 protected:
@@ -86,14 +106,17 @@ private:
 class NativeSchemaReader : public ISchemaReader
 {
 public:
-    explicit NativeSchemaReader(ReadBuffer & in_) : ISchemaReader(in_) {}
+    explicit NativeSchemaReader(ReadBuffer & in_, const FormatSettings & settings_) : ISchemaReader(in_), settings(settings_) {}
 
     NamesAndTypesList readSchema() override
     {
-        auto reader = NativeReader(in, 0);
+        auto reader = NativeReader(in, 0, settings);
         auto block = reader.read();
         return block.getNamesAndTypesList();
     }
+
+private:
+    const FormatSettings settings;
 };
 
 
@@ -115,19 +138,19 @@ void registerOutputFormatNative(FormatFactory & factory)
     factory.registerOutputFormat("Native", [](
         WriteBuffer & buf,
         const Block & sample,
-        const RowOutputFormatParams &,
-        const FormatSettings &)
+        const FormatSettings & settings)
     {
-        return std::make_shared<NativeOutputFormat>(buf, sample);
+        return std::make_shared<NativeOutputFormat>(buf, sample, settings, settings.client_protocol_version);
     });
+    factory.markOutputFormatNotTTYFriendly("Native");
 }
 
 
 void registerNativeSchemaReader(FormatFactory & factory)
 {
-    factory.registerSchemaReader("Native", [](ReadBuffer & buf, const FormatSettings &)
+    factory.registerSchemaReader("Native", [](ReadBuffer & buf, const FormatSettings & settings)
     {
-        return std::make_shared<NativeSchemaReader>(buf);
+        return std::make_shared<NativeSchemaReader>(buf, settings);
     });
 }
 

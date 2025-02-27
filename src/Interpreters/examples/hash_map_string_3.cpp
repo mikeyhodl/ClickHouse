@@ -96,7 +96,7 @@ inline bool operator==(StringRef_CompareAlwaysTrue, StringRef_CompareAlwaysTrue)
 
 struct FastHash64
 {
-    static inline uint64_t mix(uint64_t h)
+    static uint64_t mix(uint64_t h)
     {
         h ^= h >> 23;
         h *= 0x2127599bf4325c37ULL;
@@ -126,7 +126,7 @@ struct FastHash64
         pos2 = reinterpret_cast<const unsigned char*>(pos);
         v = 0;
 
-        switch (len & 7)
+        switch (len & 7) // NOLINT(bugprone-switch-missing-default-case)
         {
             case 7: v ^= static_cast<uint64_t>(pos2[6]) << 48; [[fallthrough]];
             case 6: v ^= static_cast<uint64_t>(pos2[5]) << 40; [[fallthrough]];
@@ -174,7 +174,8 @@ struct CrapWow
         size_t len = x.size;
         size_t seed = 0;
 
-        const UInt64 m = 0x95b47aa3355ba1a1, n = 0x8a970be7488fda55;
+        const UInt64 m = 0x95b47aa3355ba1a1;
+        const UInt64 n = 0x8a970be7488fda55;
         UInt64 hash;
         // 3 = m, 4 = n
         // r12 = h, r13 = k, ecx = seed, r12 = key

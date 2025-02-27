@@ -1,5 +1,4 @@
 #include <Columns/ColumnTuple.h>
-#include <Columns/ColumnVector.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Functions/FunctionFactory.h>
@@ -86,7 +85,7 @@ public:
                 auto plus_elem = plus->build({left_type, right_type});
                 res_type = plus_elem->getResultType();
             }
-            catch (DB::Exception & e)
+            catch (Exception & e)
             {
                 e.addMessage("While executing function {} for tuple element {}", getName(), i);
                 throw;
@@ -120,7 +119,7 @@ public:
 
             ColumnWithTypeAndName column;
             column.type = elem_compare->getResultType();
-            column.column = elem_compare->execute({left, right}, column.type, input_rows_count);
+            column.column = elem_compare->execute({left, right}, column.type, input_rows_count, /* dry_run = */ false);
 
             if (i == 0)
             {
@@ -130,7 +129,7 @@ public:
             {
                 auto plus_elem = plus->build({res, column});
                 auto res_type = plus_elem->getResultType();
-                res.column = plus_elem->execute({res, column}, res_type, input_rows_count);
+                res.column = plus_elem->execute({res, column}, res_type, input_rows_count, /* dry_run = */ false);
                 res.type = res_type;
             }
         }

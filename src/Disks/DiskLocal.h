@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Common/logger_useful.h>
 #include <Disks/DiskLocalCheckThread.h>
 #include <Disks/IDisk.h>
 #include <IO/ReadBufferFromFile.h>
@@ -20,31 +19,32 @@ public:
     friend class DiskLocalCheckThread;
     friend class DiskLocalReservation;
 
-    DiskLocal(const String & name_, const String & path_, UInt64 keep_free_space_bytes_);
+    DiskLocal(const String & name_, const String & path_, UInt64 keep_free_space_bytes_,
+              const Poco::Util::AbstractConfiguration & config, const String & config_prefix);
+
     DiskLocal(
         const String & name_,
         const String & path_,
         UInt64 keep_free_space_bytes_,
         ContextPtr context,
-        UInt64 local_disk_check_period_ms);
+        const Poco::Util::AbstractConfiguration & config,
+        const String & config_prefix);
+
+    DiskLocal(const String & name_, const String & path_);
 
     const String & getPath() const override { return disk_path; }
 
     ReservationPtr reserve(UInt64 bytes) override;
 
-    UInt64 getTotalSpace() const override;
-
-    UInt64 getAvailableSpace() const override;
-
-    UInt64 getUnreservedSpace() const override;
+    std::optional<UInt64> getTotalSpace() const override;
+    std::optional<UInt64> getAvailableSpace() const override;
+    std::optional<UInt64> getUnreservedSpace() const override;
 
     UInt64 getKeepingFreeSpace() const override { return keep_free_space_bytes; }
 
-    bool exists(const String & path) const override;
-
-    bool isFile(const String & path) const override;
-
-    bool isDirectory(const String & path) const override;
+    bool existsFile(const String & path) const override;
+    bool existsDirectory(const String & path) const override;
+    bool existsFileOrDirectory(const String & path) const override;
 
     size_t getFileSize(const String & path) const override;
 
@@ -64,9 +64,17 @@ public:
 
     void replaceFile(const String & from_path, const String & to_path) override;
 
-    void copy(const String & from_path, const std::shared_ptr<IDisk> & to_disk, const String & to_path) override;
+    void renameExchange(const std::string & old_path, const std::string & new_path) override;
 
-    void copyDirectoryContent(const String & from_dir, const std::shared_ptr<IDisk> & to_disk, const String & to_dir) override;
+    bool renameExchangeIfSupported(const std::string & old_path, const std::string & new_path) override;
+
+    void copyDirectoryContent(
+        const String & from_dir,
+        const std::shared_ptr<IDisk> & to_disk,
+        const String & to_dir,
+        const ReadSettings & read_settings,
+        const WriteSettings & write_settings,
+        const std::function<void()> & cancellation_hook) override;
 
     void listFiles(const String & path, std::vector<String> & file_names) const override;
 
@@ -82,9 +90,14 @@ public:
         WriteMode mode,
         const WriteSettings & settings) override;
 
+    Strings getBlobPath(const String & path) const override;
+    bool areBlobPathsRandom() const override { return false; }
+    void writeFileUsingBlobWritingFunction(const String & path, WriteMode mode, WriteBlobFunction && write_blob_function) override;
+
     void removeFile(const String & path) override;
     void removeFileIfExists(const String & path) override;
     void removeDirectory(const String & path) override;
+    void removeDirectoryIfExists(const String & path) override;
     void removeRecursive(const String & path) override;
 
     void setLastModified(const String & path, const Poco::Timestamp & timestamp) override;
@@ -97,9 +110,24 @@ public:
 
     void createHardLink(const String & src_path, const String & dst_path) override;
 
+    bool isSymlinkSupported() const override { return true; }
+
+    bool isSymlink(const String & path) const override;
+
+    bool isSymlinkNoThrow(const String & path) const override;
+
+    void createDirectoriesSymlink(const String & target, const String & link) override;
+
+    String readSymlink(const fs::path & path) const override;
+
+    bool equivalent(const String & p1, const String & p2) const override;
+
+    bool equivalentNoThrow(const String & p1, const String & p2) const override;
+
     void truncateFile(const String & path, size_t size) override;
 
     DataSourceDescription getDataSourceDescription() const override;
+    static DataSourceDescription getLocalDataSourceDescription(const String & path);
 
     bool isRemote() const override { return false; }
 
@@ -120,17 +148,13 @@ public:
     /// rudimentary. The more advanced choice would be using
     /// https://github.com/smartmontools/smartmontools. However, it's good enough for now.
     bool canRead() const noexcept;
-    bool canWrite() const noexcept;
-
-    DiskObjectStoragePtr createDiskObjectStorage() override;
+    bool canWrite() noexcept;
 
     bool supportsStat() const override { return true; }
     struct stat stat(const String & path) const override;
 
     bool supportsChmod() const override { return true; }
     void chmod(const String & path, mode_t mode) override;
-
-    MetadataStoragePtr getMetadataStorage() override;
 
 protected:
     void checkAccessImpl(const String & path) override;
@@ -148,7 +172,7 @@ private:
     const String disk_path;
     const String disk_checker_path = ".disk_checker_file";
     std::atomic<UInt64> keep_free_space_bytes;
-    Poco::Logger * logger;
+    LoggerPtr logger;
     DataSourceDescription data_source_description;
 
     UInt64 reserved_bytes = 0;

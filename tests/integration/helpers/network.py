@@ -1,7 +1,9 @@
+import ipaddress
+import logging
 import os
 import subprocess
 import time
-import logging
+
 import docker
 
 
@@ -26,21 +28,75 @@ class PartitionManager:
         self._check_instance(instance)
 
         self._add_rule(
-            {"source": instance.ip_address, "destination_port": 2181, "action": action}
+            {
+                "source": instance.ip_address,
+                "destination_port": 2181,
+                "action": action,
+            }
         )
         self._add_rule(
-            {"destination": instance.ip_address, "source_port": 2181, "action": action}
+            {
+                "destination": instance.ip_address,
+                "source_port": 2181,
+                "action": action,
+            }
         )
+
+        if instance.ipv6_address:
+            self._add_rule(
+                {
+                    "source": instance.ipv6_address,
+                    "destination_port": 2181,
+                    "action": action,
+                }
+            )
+            self._add_rule(
+                {
+                    "destination": instance.ipv6_address,
+                    "source_port": 2181,
+                    "action": action,
+                }
+            )
+
+    def dump_rules(self):
+        v4 = _NetworkManager.get().dump_rules()
+        v6 = _NetworkManager.get().dump_v6_rules()
+
+        return v4 + v6
 
     def restore_instance_zk_connections(self, instance, action="DROP"):
         self._check_instance(instance)
 
         self._delete_rule(
-            {"source": instance.ip_address, "destination_port": 2181, "action": action}
+            {
+                "source": instance.ip_address,
+                "destination_port": 2181,
+                "action": action,
+            }
         )
         self._delete_rule(
-            {"destination": instance.ip_address, "source_port": 2181, "action": action}
+            {
+                "destination": instance.ip_address,
+                "source_port": 2181,
+                "action": action,
+            }
         )
+
+        if instance.ipv6_address:
+            self._delete_rule(
+                {
+                    "source": instance.ipv6_address,
+                    "destination_port": 2181,
+                    "action": action,
+                }
+            )
+            self._delete_rule(
+                {
+                    "destination": instance.ipv6_address,
+                    "source_port": 2181,
+                    "action": action,
+                }
+            )
 
     def partition_instances(self, left, right, port=None, action="DROP"):
         self._check_instance(left)
@@ -56,8 +112,22 @@ class PartitionManager:
                 rule["destination_port"] = port
             return rule
 
+        def create_rule_v6(src, dst):
+            rule = {
+                "source": src.ipv6_address,
+                "destination": dst.ipv6_address,
+                "action": action,
+            }
+            if port is not None:
+                rule["destination_port"] = port
+            return rule
+
         self._add_rule(create_rule(left, right))
         self._add_rule(create_rule(right, left))
+
+        if left.ipv6_address and right.ipv6_address:
+            self._add_rule(create_rule_v6(left, right))
+            self._add_rule(create_rule_v6(right, left))
 
     def add_network_delay(self, instance, delay_ms):
         self._add_tc_netem_delay(instance, delay_ms)
@@ -65,7 +135,11 @@ class PartitionManager:
     def heal_all(self):
         while self._iptables_rules:
             rule = self._iptables_rules.pop()
-            _NetworkManager.get().delete_iptables_rule(**rule)
+
+            if self._is_ipv6_rule(rule):
+                _NetworkManager.get().delete_ip6tables_rule(**rule)
+            else:
+                _NetworkManager.get().delete_iptables_rule(**rule)
 
         while self._netem_delayed_instances:
             instance = self._netem_delayed_instances.pop()
@@ -87,12 +161,27 @@ class PartitionManager:
         if instance.ip_address is None:
             raise Exception("Instance + " + instance.name + " is not launched!")
 
+    @staticmethod
+    def _is_ipv6_rule(rule):
+        if rule.get("source"):
+            return ipaddress.ip_address(rule["source"]).version == 6
+        if rule.get("destination"):
+            return ipaddress.ip_address(rule["destination"]).version == 6
+
+        return False
+
     def _add_rule(self, rule):
-        _NetworkManager.get().add_iptables_rule(**rule)
+        if self._is_ipv6_rule(rule):
+            _NetworkManager.get().add_ip6tables_rule(**rule)
+        else:
+            _NetworkManager.get().add_iptables_rule(**rule)
         self._iptables_rules.append(rule)
 
     def _delete_rule(self, rule):
-        _NetworkManager.get().delete_iptables_rule(**rule)
+        if self._is_ipv6_rule(rule):
+            _NetworkManager.get().delete_ip6tables_rule(**rule)
+        else:
+            _NetworkManager.get().delete_iptables_rule(**rule)
         self._iptables_rules.remove(rule)
 
     def _add_tc_netem_delay(self, instance, delay_ms):
@@ -147,8 +236,28 @@ class _NetworkManager:
             cls._instance = cls(**kwargs)
         return cls._instance
 
+    def setup_ip6tables_docker_user_chain(self):
+        _rules = subprocess.check_output(f"ip6tables-save", shell=True)
+        if "DOCKER-USER" in _rules.decode("utf-8"):
+            return
+
+        setup_cmds = [
+            ["ip6tables", "--wait", "-N", "DOCKER-USER"],
+            ["ip6tables", "--wait", "-I", "FORWARD", "-j", "DOCKER-USER"],
+            ["ip6tables", "--wait", "-A", "DOCKER-USER", "-j", "RETURN"],
+        ]
+        for cmd in setup_cmds:
+            self._exec_run(cmd, privileged=True)
+
     def add_iptables_rule(self, **kwargs):
         cmd = ["iptables", "--wait", "-I", "DOCKER-USER", "1"]
+        cmd.extend(self._iptables_cmd_suffix(**kwargs))
+        self._exec_run(cmd, privileged=True)
+
+    def add_ip6tables_rule(self, **kwargs):
+        self.setup_ip6tables_docker_user_chain()
+
+        cmd = ["ip6tables", "--wait", "-I", "DOCKER-USER", "1"]
         cmd.extend(self._iptables_cmd_suffix(**kwargs))
         self._exec_run(cmd, privileged=True)
 
@@ -157,21 +266,35 @@ class _NetworkManager:
         cmd.extend(self._iptables_cmd_suffix(**kwargs))
         self._exec_run(cmd, privileged=True)
 
+    def delete_ip6tables_rule(self, **kwargs):
+        cmd = ["ip6tables", "--wait", "-D", "DOCKER-USER"]
+        cmd.extend(self._iptables_cmd_suffix(**kwargs))
+        self._exec_run(cmd, privileged=True)
+
+    def dump_rules(self):
+        cmd = ["iptables", "-L", "DOCKER-USER"]
+        return self._exec_run(cmd, privileged=True)
+
+    def dump_v6_rules(self):
+        cmd = ["ip6tables", "-L", "DOCKER-USER"]
+        return self._exec_run(cmd, privileged=True)
+
     @staticmethod
     def clean_all_user_iptables_rules():
-        for i in range(1000):
-            iptables_iter = i
-            # when rules will be empty, it will return error
-            res = subprocess.run("iptables --wait -D DOCKER-USER 1", shell=True)
+        for iptables in ("iptables", "ip6tables"):
+            for i in range(1000):
+                iptables_iter = i
+                # when rules will be empty, it will return error
+                res = subprocess.run(f"{iptables} --wait -D DOCKER-USER 1", shell=True)
 
-            if res.returncode != 0:
-                logging.info(
-                    "All iptables rules cleared, "
-                    + str(iptables_iter)
-                    + " iterations, last error: "
-                    + str(res.stderr)
-                )
-                return
+                if res.returncode != 0:
+                    logging.info(
+                        f"All {iptables} rules cleared, "
+                        + str(iptables_iter)
+                        + " iterations, last error: "
+                        + str(res.stderr)
+                    )
+                    break
 
     @staticmethod
     def _iptables_cmd_suffix(
@@ -181,6 +304,7 @@ class _NetworkManager:
         destination_port=None,
         action=None,
         probability=None,
+        protocol=None,
         custom_args=None,
     ):
         ret = []
@@ -195,7 +319,7 @@ class _NetworkManager:
                     str(probability),
                 ]
             )
-        ret.extend(["-p", "tcp"])
+        ret.extend(["-p", "tcp" if protocol is None else protocol])
         if source is not None:
             ret.extend(["-s", source])
         if destination is not None:
@@ -212,10 +336,14 @@ class _NetworkManager:
 
     def __init__(
         self,
-        container_expire_timeout=50,
-        container_exit_timeout=60,
+        container_expire_timeout=600,
+        container_exit_timeout=660,
         docker_api_version=os.environ.get("DOCKER_API_VERSION"),
     ):
+        # container should be alive for at least 15 seconds then the expiration
+        # timeout, this is the protection from the case when the container will
+        # be destroyed just when some test will try to use it.
+        assert container_exit_timeout >= container_expire_timeout + 15
 
         self.container_expire_timeout = container_expire_timeout
         self.container_exit_timeout = container_exit_timeout
@@ -232,7 +360,9 @@ class _NetworkManager:
 
     def _ensure_container(self):
         if self._container is None or self._container_expire_time <= time.time():
-
+            image_name = "clickhouse/integration-helper:" + os.getenv(
+                "DOCKER_HELPER_TAG", "latest"
+            )
             for i in range(5):
                 if self._container is not None:
                     try:
@@ -249,7 +379,7 @@ class _NetworkManager:
                         time.sleep(i)
 
             image = subprocess.check_output(
-                "docker images -q clickhouse/integration-helper 2>/dev/null", shell=True
+                f"docker images -q {image_name} 2>/dev/null", shell=True
             )
             if not image.strip():
                 print("No network image helper, will try download")
@@ -258,22 +388,18 @@ class _NetworkManager:
                 for i in range(5):
                     try:
                         subprocess.check_call(  # STYLE_CHECK_ALLOW_SUBPROCESS_CHECK_CALL
-                            "docker pull clickhouse/integration-helper", shell=True
+                            f"docker pull {image_name}", shell=True
                         )
                         break
                     except:
                         time.sleep(i)
                 else:
-                    raise Exception("Cannot pull clickhouse/integration-helper image")
+                    raise Exception(f"Cannot pull {image_name} image")
 
             self._container = self._docker_client.containers.run(
-                "clickhouse/integration-helper",
+                image_name,
                 auto_remove=True,
                 command=("sleep %s" % self.container_exit_timeout),
-                # /run/xtables.lock passed inside for correct iptables --wait
-                volumes={
-                    "/run/xtables.lock": {"bind": "/run/xtables.lock", "mode": "ro"}
-                },
                 detach=True,
                 network_mode="host",
             )
@@ -307,7 +433,7 @@ class _NetworkManager:
         return output
 
 
-# Approximately mesure network I/O speed for interface
+# Approximately measure network I/O speed for interface
 class NetThroughput(object):
     def __init__(self, node):
         self.node = node

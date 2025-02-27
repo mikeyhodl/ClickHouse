@@ -9,6 +9,7 @@
 namespace DB
 {
 
+class Exception;
 class ReadBuffer;
 
 /** Basic functionality for implementation of
@@ -25,10 +26,17 @@ protected:
     char * compressed_buffer = nullptr;
 
     /// Don't checksum on decompressing.
+#if defined(FUZZER)
+    bool disable_checksum = true;
+#else
     bool disable_checksum = false;
+#endif
 
     /// Allow reading data, compressed by different codecs from one file.
     bool allow_different_codecs;
+
+    /// Report decompression errors as CANNOT_DECOMPRESS, not CORRUPTED_DATA
+    bool external_data;
 
     /// Read compressed data into compressed_buffer. Get size of decompressed data from block header. Checksum if need.
     ///
@@ -57,6 +65,9 @@ protected:
     /// It is more efficient for compression codec NONE but not suitable if you want to decompress into specific location.
     void decompress(BufferBase::Buffer & to, size_t size_decompressed, size_t size_compressed_without_checksum);
 
+    /// Adds diagnostics to the error message.
+    void addDiagnostics(Exception & e) const;
+
     /// Flush all asynchronous decompress request.
     void flushAsynchronousDecompressRequests() const;
 
@@ -67,7 +78,7 @@ protected:
 
 public:
     /// 'compressed_in' could be initialized lazily, but before first call of 'readCompressedData'.
-    explicit CompressedReadBufferBase(ReadBuffer * in = nullptr, bool allow_different_codecs_ = false);
+    explicit CompressedReadBufferBase(ReadBuffer * in = nullptr, bool allow_different_codecs_ = false, bool external_data_ = false);
     virtual ~CompressedReadBufferBase();
 
     /** Disable checksums.

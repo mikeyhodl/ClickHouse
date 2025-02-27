@@ -11,7 +11,7 @@ slug: /zh/operations/system-tables/mutations
 
 -   `table` ([String](../../sql-reference/data-types/string.md)) — 应用mutation的表名称。
 
--   `mutation_id` ([String](../../sql-reference/data-types/string.md)) — mutation的ID。对于复制表，这些ID对应于ZooKeeper中<table_path_in_zookeeper>/mutations/目录下的znode名称。对于非复制表，ID对应表的数据目录中的文件名。
+-   `mutation_id` ([String](../../sql-reference/data-types/string.md)) — mutation的ID。对于复制表，这些ID对应于ZooKeeper中`<table_path_in_zookeeper>`/mutations/目录下的znode名称。对于非复制表，ID对应表的数据目录中的文件名。
 
 -   `command` ([String](../../sql-reference/data-types/string.md)) — mutation命令字符串（`ALTER TABLE [db.]table`语句之后的部分)。
 
@@ -49,5 +49,3 @@ slug: /zh/operations/system-tables/mutations
 - Mutations
 - [MergeTree](../../engines/table-engines/mergetree-family/mergetree.md) 表引擎
 - [ReplicatedMergeTree](../../engines/table-engines/mergetree-family/replication.md) 族
-
-[Original article](https://clickhouse.com/docs/en/operations/system_tables/mutations) <!--hide-->

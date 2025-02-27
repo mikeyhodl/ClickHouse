@@ -1,17 +1,19 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/quantiles
-sidebar_position: 201
+slug: /sql-reference/aggregate-functions/reference/quantiles
+sidebar_position: 177
+title: "quantiles Functions"
+description: "quantiles, quantilesExactExclusive, quantilesExactInclusive, quantilesGK"
 ---
 
 # quantiles Functions
 
-## quantiles
+## quantiles {#quantiles}
 
-Syntax: `quantiles(level1, level2, …)(x)`
+Syntax: `quantiles(level1, level2, ...)(x)`
 
-All the quantile functions also have corresponding quantiles functions: `quantiles`, `quantilesDeterministic`, `quantilesTiming`, `quantilesTimingWeighted`, `quantilesExact`, `quantilesExactWeighted`, `quantilesTDigest`, `quantilesBFloat16`. These functions calculate all the quantiles of the listed levels in one pass, and return an array of the resulting values.
+All the quantile functions also have corresponding quantiles functions: `quantiles`, `quantilesDeterministic`, `quantilesTiming`, `quantilesTimingWeighted`, `quantilesExact`, `quantilesExactWeighted`, `quantileExactWeightedInterpolated`, `quantileInterpolatedWeighted`, `quantilesTDigest`, `quantilesBFloat16`, `quantilesDD`. These functions calculate all the quantiles of the listed levels in one pass, and return an array of the resulting values.
 
-## quantilesExactExclusive
+## quantilesExactExclusive {#quantilesexactexclusive}
 
 Exactly computes the [quantiles](https://en.wikipedia.org/wiki/Quantile) of a numeric data sequence.
 
@@ -29,21 +31,21 @@ quantilesExactExclusive(level1, level2, ...)(expr)
 
 **Arguments**
 
--   `expr` — Expression over the column values resulting in numeric [data types](../../../sql-reference/data-types/index.md#data_types), [Date](../../../sql-reference/data-types/date.md) or [DateTime](../../../sql-reference/data-types/datetime.md).
+- `expr` — Expression over the column values resulting in numeric [data types](../../../sql-reference/data-types/index.md#data_types), [Date](../../../sql-reference/data-types/date.md) or [DateTime](../../../sql-reference/data-types/datetime.md).
 
 **Parameters**
 
--   `level` — Levels of quantiles. Possible values: (0, 1) — bounds not included. [Float](../../../sql-reference/data-types/float.md).
+- `level` — Levels of quantiles. Possible values: (0, 1) — bounds not included. [Float](../../../sql-reference/data-types/float.md).
 
 **Returned value**
 
--   [Array](../../../sql-reference/data-types/array.md) of quantiles of the specified levels.
+- [Array](../../../sql-reference/data-types/array.md) of quantiles of the specified levels.
 
 Type of array values:
 
--   [Float64](../../../sql-reference/data-types/float.md) for numeric data type input.
--   [Date](../../../sql-reference/data-types/date.md) if input values have the `Date` type.
--   [DateTime](../../../sql-reference/data-types/datetime.md) if input values have the `DateTime` type.
+- [Float64](../../../sql-reference/data-types/float.md) for numeric data type input.
+- [Date](../../../sql-reference/data-types/date.md) if input values have the `Date` type.
+- [DateTime](../../../sql-reference/data-types/datetime.md) if input values have the `DateTime` type.
 
 **Example**
 
@@ -63,7 +65,7 @@ Result:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## quantilesExactInclusive
+## quantilesExactInclusive {#quantilesexactinclusive}
 
 Exactly computes the [quantiles](https://en.wikipedia.org/wiki/Quantile) of a numeric data sequence.
 
@@ -81,21 +83,21 @@ quantilesExactInclusive(level1, level2, ...)(expr)
 
 **Arguments**
 
--   `expr` — Expression over the column values resulting in numeric [data types](../../../sql-reference/data-types/index.md#data_types), [Date](../../../sql-reference/data-types/date.md) or [DateTime](../../../sql-reference/data-types/datetime.md).
+- `expr` — Expression over the column values resulting in numeric [data types](../../../sql-reference/data-types/index.md#data_types), [Date](../../../sql-reference/data-types/date.md) or [DateTime](../../../sql-reference/data-types/datetime.md).
 
 **Parameters**
 
--   `level` — Levels of quantiles. Possible values: [0, 1] — bounds included. [Float](../../../sql-reference/data-types/float.md).
+- `level` — Levels of quantiles. Possible values: [0, 1] — bounds included. [Float](../../../sql-reference/data-types/float.md).
 
 **Returned value**
 
--   [Array](../../../sql-reference/data-types/array.md) of quantiles of the specified levels.
+- [Array](../../../sql-reference/data-types/array.md) of quantiles of the specified levels.
 
 Type of array values:
 
--   [Float64](../../../sql-reference/data-types/float.md) for numeric data type input.
--   [Date](../../../sql-reference/data-types/date.md) if input values have the `Date` type.
--   [DateTime](../../../sql-reference/data-types/datetime.md) if input values have the `DateTime` type.
+- [Float64](../../../sql-reference/data-types/float.md) for numeric data type input.
+- [Date](../../../sql-reference/data-types/date.md) if input values have the `Date` type.
+- [DateTime](../../../sql-reference/data-types/datetime.md) if input values have the `DateTime` type.
 
 **Example**
 
@@ -113,4 +115,60 @@ Result:
 ┌─quantilesExactInclusive(0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 0.999)(x)─┐
 │ [249.75,499.5,749.25,899.1,949.05,989.01,998.001]                   │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+## quantilesGK {#quantilesgk}
+
+`quantilesGK` works similarly with `quantileGK` but allows us to calculate quantities at different levels simultaneously and returns an array.
+
+**Syntax**
+
+``` sql
+quantilesGK(accuracy, level1, level2, ...)(expr)
+```
+
+**Returned value**
+
+- [Array](../../../sql-reference/data-types/array.md) of quantiles of the specified levels.
+
+Type of array values:
+
+- [Float64](../../../sql-reference/data-types/float.md) for numeric data type input.
+- [Date](../../../sql-reference/data-types/date.md) if input values have the `Date` type.
+- [DateTime](../../../sql-reference/data-types/datetime.md) if input values have the `DateTime` type.
+
+**Example**
+
+Query:
+
+
+``` sql
+SELECT quantilesGK(1, 0.25, 0.5, 0.75)(number + 1)
+FROM numbers(1000)
+
+┌─quantilesGK(1, 0.25, 0.5, 0.75)(plus(number, 1))─┐
+│ [1,1,1]                                          │
+└──────────────────────────────────────────────────┘
+
+SELECT quantilesGK(10, 0.25, 0.5, 0.75)(number + 1)
+FROM numbers(1000)
+
+┌─quantilesGK(10, 0.25, 0.5, 0.75)(plus(number, 1))─┐
+│ [156,413,659]                                     │
+└───────────────────────────────────────────────────┘
+
+
+SELECT quantilesGK(100, 0.25, 0.5, 0.75)(number + 1)
+FROM numbers(1000)
+
+┌─quantilesGK(100, 0.25, 0.5, 0.75)(plus(number, 1))─┐
+│ [251,498,741]                                      │
+└────────────────────────────────────────────────────┘
+
+SELECT quantilesGK(1000, 0.25, 0.5, 0.75)(number + 1)
+FROM numbers(1000)
+
+┌─quantilesGK(1000, 0.25, 0.5, 0.75)(plus(number, 1))─┐
+│ [249,499,749]                                       │
+└─────────────────────────────────────────────────────┘
 ```

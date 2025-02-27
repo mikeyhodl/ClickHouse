@@ -36,14 +36,22 @@ struct CountSubstringsImpl
         const ColumnString::Offsets & haystack_offsets,
         const std::string & needle,
         const ColumnPtr & start_pos,
-        PaddedPODArray<UInt64> & res)
+        PaddedPODArray<UInt64> & res,
+        [[maybe_unused]] ColumnUInt8 * res_null,
+        size_t input_rows_count)
     {
+        /// `res_null` serves as an output parameter for implementing an XYZOrNull variant.
+        chassert(!res_null);
+
         const UInt8 * const begin = haystack_data.data();
         const UInt8 * const end = haystack_data.data() + haystack_data.size();
         const UInt8 * pos = begin;
 
         /// FIXME: suboptimal
-        memset(&res[0], 0, res.size() * sizeof(res[0]));
+        memset(&res[0], 0, res.size() * sizeof(res[0])); /// NOLINT(readability-container-data-pointer)
+
+        if (needle.empty())
+            return; // Return all zeros
 
         /// Current index in the array of strings.
         size_t i = 0;
@@ -54,7 +62,7 @@ struct CountSubstringsImpl
         while (pos < end && end != (pos = searcher.search(pos, end - pos)))
         {
             /// Determine which index it refers to.
-            while (begin + haystack_offsets[i] <= pos)
+            while (i < input_rows_count - 1 && begin + haystack_offsets[i] <= pos)
                 ++i;
 
             auto start = start_pos != nullptr ? start_pos->getUInt(i) : 0;
@@ -72,7 +80,10 @@ struct CountSubstringsImpl
                 continue;
             }
             pos = begin + haystack_offsets[i];
+
             ++i;
+            if (i >= input_rows_count)
+                break; // Handle the end of the haystacks
         }
     }
 
@@ -104,8 +115,12 @@ struct CountSubstringsImpl
         std::string haystack,
         std::string needle,
         const ColumnPtr & start_pos,
-        PaddedPODArray<UInt64> & res)
+        PaddedPODArray<UInt64> & res,
+        [[maybe_unused]] ColumnUInt8 * res_null)
     {
+        /// `res_null` serves as an output parameter for implementing an XYZOrNull variant.
+        chassert(!res_null);
+
         Impl::toLowerIfNeed(haystack);
         Impl::toLowerIfNeed(needle);
 
@@ -138,14 +153,19 @@ struct CountSubstringsImpl
         const ColumnString::Chars & needle_data,
         const ColumnString::Offsets & needle_offsets,
         const ColumnPtr & start_pos,
-        PaddedPODArray<UInt64> & res)
+        PaddedPODArray<UInt64> & res,
+        [[maybe_unused]] ColumnUInt8 * res_null,
+        size_t input_rows_count)
     {
+        chassert(input_rows_count == haystack_offsets.size());
+
+        /// `res_null` serves as an output parameter for implementing an XYZOrNull variant.
+        chassert(!res_null);
+
         ColumnString::Offset prev_haystack_offset = 0;
         ColumnString::Offset prev_needle_offset = 0;
 
-        size_t size = haystack_offsets.size();
-
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             size_t needle_size = needle_offsets[i] - prev_needle_offset - 1;
             size_t haystack_size = haystack_offsets[i] - prev_haystack_offset - 1;
@@ -191,15 +211,19 @@ struct CountSubstringsImpl
         const ColumnString::Chars & needle_data,
         const ColumnString::Offsets & needle_offsets,
         const ColumnPtr & start_pos,
-        PaddedPODArray<UInt64> & res)
+        PaddedPODArray<UInt64> & res,
+        [[maybe_unused]] ColumnUInt8 * res_null,
+        size_t input_rows_count)
     {
-        /// NOTE You could use haystack indexing. But this is a rare case.
+        chassert(input_rows_count == needle_offsets.size());
 
+        /// `res_null` serves as an output parameter for implementing an XYZOrNull variant.
+        chassert(!res_null);
+
+        /// NOTE You could use haystack indexing. But this is a rare case.
         ColumnString::Offset prev_needle_offset = 0;
 
-        size_t size = needle_offsets.size();
-
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             res[i] = 0;
             auto start = start_pos != nullptr ? std::max(start_pos->getUInt(i), UInt64(1)) : UInt64(1);
@@ -208,16 +232,19 @@ struct CountSubstringsImpl
                 const char * needle_beg = reinterpret_cast<const char *>(&needle_data[prev_needle_offset]);
                 size_t needle_size = needle_offsets[i] - prev_needle_offset - 1;
 
-                typename Impl::SearcherInSmallHaystack searcher = Impl::createSearcherInSmallHaystack(needle_beg, needle_size);
-
-                const UInt8 * end = reinterpret_cast<const UInt8 *>(haystack.data() + haystack.size());
-                const UInt8 * beg = reinterpret_cast<const UInt8 *>(Impl::advancePos(haystack.data(), reinterpret_cast<const char *>(end), start - 1));
-
-                const UInt8 * pos;
-                while ((pos = searcher.search(beg, end)) < end)
+                if (needle_size > 0)
                 {
-                    ++res[i];
-                    beg = pos + needle_size;
+                    typename Impl::SearcherInSmallHaystack searcher = Impl::createSearcherInSmallHaystack(needle_beg, needle_size);
+
+                    const UInt8 * end = reinterpret_cast<const UInt8 *>(haystack.data() + haystack.size());
+                    const UInt8 * beg = reinterpret_cast<const UInt8 *>(Impl::advancePos(haystack.data(), reinterpret_cast<const char *>(end), start - 1));
+
+                    const UInt8 * pos;
+                    while ((pos = searcher.search(beg, end)) < end)
+                    {
+                        ++res[i];
+                        beg = pos + needle_size;
+                    }
                 }
             }
 

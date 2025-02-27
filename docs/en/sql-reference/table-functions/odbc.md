@@ -1,10 +1,12 @@
 ---
-slug: /en/sql-reference/table-functions/odbc
-sidebar_position: 44
+slug: /sql-reference/table-functions/odbc
+sidebar_position: 150
 sidebar_label: odbc
+title: "odbc"
+description: "Returns the table that is connected via ODBC."
 ---
 
-# odbc
+# odbc Table Function
 
 Returns table that is connected via [ODBC](https://en.wikipedia.org/wiki/Open_Database_Connectivity).
 
@@ -14,15 +16,15 @@ odbc(connection_settings, external_database, external_table)
 
 Parameters:
 
--   `connection_settings` — Name of the section with connection settings in the `odbc.ini` file.
--   `external_database` — Name of a database in an external DBMS.
--   `external_table` — Name of a table in the `external_database`.
+- `connection_settings` — Name of the section with connection settings in the `odbc.ini` file.
+- `external_database` — Name of a database in an external DBMS.
+- `external_table` — Name of a table in the `external_database`.
 
 To safely implement ODBC connections, ClickHouse uses a separate program `clickhouse-odbc-bridge`. If the ODBC driver is loaded directly from `clickhouse-server`, driver problems can crash the ClickHouse server. ClickHouse automatically starts `clickhouse-odbc-bridge` when it is required. The ODBC bridge program is installed from the same package as the `clickhouse-server`.
 
 The fields with the `NULL` values from the external table are converted into the default values for the base data type. For example, if a remote MySQL table field has the `INT NULL` type it is converted to 0 (the default value for ClickHouse `Int32` data type).
 
-## Usage Example
+## Usage Example {#usage-example}
 
 **Getting data from the local MySQL installation via ODBC**
 
@@ -99,7 +101,7 @@ SELECT * FROM odbc('DSN=mysqlconn', 'test', 'test')
 └────────┴──────────────┴───────┴────────────────┘
 ```
 
-## See Also
+## See Also {#see-also}
 
--   [ODBC dictionaries](../../sql-reference/dictionaries/external-dictionaries/external-dicts-dict-sources.md#dicts-external_dicts_dict_sources-odbc)
--   [ODBC table engine](../../engines/table-engines/integrations/odbc.md).
+- [ODBC dictionaries](../../sql-reference/dictionaries/index.md#dictionary-sources#dicts-external_dicts_dict_sources-odbc)
+- [ODBC table engine](../../engines/table-engines/integrations/odbc.md).

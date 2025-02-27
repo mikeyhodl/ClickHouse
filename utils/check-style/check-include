@@ -13,7 +13,6 @@ BUILD_DIR=${BUILD_DIR:=./build}
 inc="-I. \
 -I./contrib/libdivide \
 -I./contrib/re2 \
--I${BUILD_DIR}/contrib/re2_st \
 -I./contrib/libfarmhash \
 -I./contrib/libmetrohash/src \
 -I./contrib/double-conversion \
@@ -29,8 +28,6 @@ inc="-I. \
 -I./contrib/poco/MongoDB/include \
 -I./contrib/poco/XML/include \
 -I./contrib/poco/Crypto/include \
--I./contrib/poco/Data/ODBC/include \
--I./contrib/poco/Data/include \
 -I./contrib/poco/Net/include \
 -I./contrib/poco/Util/include \
 -I./contrib/poco/Foundation/include \
@@ -43,15 +40,13 @@ inc="-I. \
 -I${BUILD_DIR}/contrib/llvm/llvm/include \
 -I./contrib/libpcg-random/include \
 -I./contrib/capnproto/c++/src \
--I./contrib/unixodbc/include \
--I./contrib/unixodbc-cmake/linux_x86_64 \
 -I./base/mysqlxx \
 -I./base \
 -I${BUILD_DIR}/base \
 -I./base/daemon \
 -I./base/consistent-hashing \
 -I./contrib/libhdfs3/include \
--I./contrib/base64/include \
+-I./contrib/aklomp-base64/include \
 -I./contrib/protobuf/src \
 -I./contrib/cppkafka/include \
 -I./contrib/librdkafka-cmake/include \

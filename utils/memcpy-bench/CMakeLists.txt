@@ -1,3 +1,9 @@
+# memcpy_jart.S contains position dependent code
+if (ENABLE_POSITION_INDEPENDENT_BINARY OR NOT OS_LINUX OR NOT ARCH_AMD64)
+    message (WARNING "Not building memcpy-bench due to PIC enabled or not Linux or not x86")
+    return ()
+endif ()
+
 enable_language(ASM)
 
 clickhouse_add_executable (memcpy-bench
@@ -22,5 +28,5 @@ endif()
 set_source_files_properties(FastMemcpy.cpp PROPERTIES COMPILE_FLAGS "-Wno-old-style-cast")
 set_source_files_properties(FastMemcpy_Avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -Wno-old-style-cast -Wno-cast-qual -Wno-cast-align")
 
-target_link_libraries(memcpy-bench PRIVATE dbms boost::program_options)
+target_link_libraries(memcpy-bench PRIVATE dbms clickhouse_functions boost::program_options)
 

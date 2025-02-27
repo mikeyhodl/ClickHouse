@@ -1,6 +1,10 @@
 #include <DataTypes/EnumValues.h>
 #include <boost/algorithm/string.hpp>
 #include <base/sort.h>
+#include <Common/CurrentThread.h>
+#include <Interpreters/Context.h>
+#include <Core/Settings.h>
+#include <IO/ReadHelpers.h>
 
 
 namespace DB
@@ -10,7 +14,7 @@ namespace ErrorCodes
 {
     extern const int SYNTAX_ERROR;
     extern const int EMPTY_DATA_PASSED;
-    extern const int BAD_ARGUMENTS;
+    extern const int UNKNOWN_ELEMENT_OF_ENUM;
 }
 
 template <typename T>
@@ -18,7 +22,7 @@ EnumValues<T>::EnumValues(const Values & values_)
     : values(values_)
 {
     if (values.empty())
-        throw Exception{"DataTypeEnum enumeration cannot be empty", ErrorCodes::EMPTY_DATA_PASSED};
+        throw Exception(ErrorCodes::EMPTY_DATA_PASSED, "DataTypeEnum enumeration cannot be empty");
 
     ::sort(std::begin(values), std::end(values), [] (auto & left, auto & right)
     {
@@ -37,43 +41,48 @@ void EnumValues<T>::fillMaps()
             { StringRef{name_and_value.first}, name_and_value.second });
 
         if (!inserted_value.second)
-            throw Exception{"Duplicate names in enum: '" + name_and_value.first + "' = " + toString(name_and_value.second)
-                    + " and " + toString(inserted_value.first->getMapped()),
-                ErrorCodes::SYNTAX_ERROR};
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Duplicate names in enum: '{}' = {} and {}",
+                    name_and_value.first, toString(name_and_value.second), toString(inserted_value.first->getMapped()));
 
         const auto inserted_name = value_to_name_map.insert(
             { name_and_value.second, StringRef{name_and_value.first} });
 
         if (!inserted_name.second)
-            throw Exception{"Duplicate values in enum: '" + name_and_value.first + "' = " + toString(name_and_value.second)
-                    + " and '" + toString((*inserted_name.first).first) + "'",
-                ErrorCodes::SYNTAX_ERROR};
+            throw Exception(ErrorCodes::SYNTAX_ERROR, "Duplicate values in enum: '{}' = {} and '{}'",
+                    name_and_value.first, toString(name_and_value.second), toString((*inserted_name.first).first));
     }
 }
 
 template <typename T>
-T EnumValues<T>::getValue(StringRef field_name, bool try_treat_as_id) const
+T EnumValues<T>::getValue(StringRef field_name) const
 {
-    const auto it = name_to_value_map.find(field_name);
-    if (!it)
+    T x;
+    if (auto it = name_to_value_map.find(field_name); it != name_to_value_map.end())
     {
-        /// It is used in CSV and TSV input formats. If we fail to find given string in
-        /// enum names, we will try to treat it as enum id.
-        if (try_treat_as_id)
-        {
-            T x;
-            ReadBufferFromMemory tmp_buf(field_name.data, field_name.size);
-            readText(x, tmp_buf);
-            /// Check if we reached end of the tmp_buf (otherwise field_name is not a number)
-            /// and try to find it in enum ids
-            if (tmp_buf.eof() && value_to_name_map.find(x) != value_to_name_map.end())
-                return x;
-        }
-        auto hints = this->getHints(field_name.toString());
-        auto hints_string = !hints.empty() ? ", maybe you meant: " + toString(hints) : "";
-        throw Exception{"Unknown element '" + field_name.toString() + "' for enum" + hints_string, ErrorCodes::BAD_ARGUMENTS};
+        return it->getMapped();
     }
-    return it->getMapped();
+    if (tryParse(x, field_name.data, field_name.size) && value_to_name_map.contains(x))
+    {
+        /// If we fail to find given string in enum names, we will try to treat it as enum id.
+        return x;
+    }
+
+    auto hints = this->getHints(field_name.toString());
+    auto hints_string = !hints.empty() ? ", maybe you meant: " + toString(hints) : "";
+    throw Exception(ErrorCodes::UNKNOWN_ELEMENT_OF_ENUM, "Unknown element '{}' for enum{}", field_name.toString(), hints_string);
+}
+
+template <typename T>
+bool EnumValues<T>::tryGetValue(T & x, StringRef field_name) const
+{
+    if (auto it = name_to_value_map.find(field_name); it != name_to_value_map.end())
+    {
+        x = it->getMapped();
+        return true;
+    }
+
+    /// If we fail to find given string in enum names, we will try to treat it as enum id.
+    return tryParse(x, field_name.data, field_name.size) && value_to_name_map.contains(x);
 }
 
 template <typename T>

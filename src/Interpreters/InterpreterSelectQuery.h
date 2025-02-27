@@ -1,21 +1,18 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <Access/EnabledRowPolicies.h>
 #include <Core/QueryProcessingStage.h>
-#include <Interpreters/ExpressionActions.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/IInterpreterUnionOrSelectQuery.h>
 #include <Interpreters/PreparedSets.h>
 #include <Interpreters/StorageID.h>
 #include <Parsers/ASTSelectQuery.h>
-#include <Storages/ReadInOrderOptimizer.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/TableLockHolder.h>
 #include <QueryPipeline/Pipe.h>
-
-#include <Columns/FilterDescription.h>
 
 namespace Poco
 {
@@ -25,7 +22,6 @@ class Logger;
 namespace DB
 {
 
-class SubqueryForSet;
 class InterpreterSelectWithUnionQuery;
 class Context;
 class QueryPlan;
@@ -116,21 +112,11 @@ public:
     bool hasAggregation() const { return query_analyzer->hasAggregation(); }
 
     static void addEmptySourceToQueryPlan(
-        QueryPlan & query_plan, const Block & source_header, const SelectQueryInfo & query_info, const ContextPtr & context_);
+        QueryPlan & query_plan, const Block & source_header, const SelectQueryInfo & query_info);
 
     Names getRequiredColumns() { return required_columns; }
 
     bool supportsTransactions() const override { return true; }
-
-    /// This is tiny crutch to support reading from localhost replica during distributed query
-    /// Replica need to talk to the initiator through a connection to ask for a next task
-    /// but there will be no connection if we create Interpreter explicitly.
-    /// The other problem is that context is copied inside Interpreter's constructor
-    /// And with this method we can change the internals of cloned one
-    void setMergeTreeReadTaskCallbackAndClientInfo(MergeTreeReadTaskCallback && callback);
-
-    /// It will set shard_num and shard_count to the client_info
-    void setProperClientInfo(size_t replica_num, size_t replica_count);
 
     FilterDAGInfoPtr getAdditionalQueryInfo() const { return additional_filter_info; }
 
@@ -140,6 +126,15 @@ public:
 
     static SortDescription getSortDescription(const ASTSelectQuery & query, const ContextPtr & context);
     static UInt64 getLimitForSorting(const ASTSelectQuery & query, const ContextPtr & context);
+
+    static bool isQueryWithFinal(const SelectQueryInfo & info);
+
+
+    static std::pair<UInt64, UInt64> getLimitLengthAndOffset(const ASTSelectQuery & query, const ContextPtr & context);
+
+    /// Adjust the parallel replicas settings (enabled, disabled) based on the query analysis
+    bool adjustParallelReplicasAfterAnalysis();
+
 
 private:
     InterpreterSelectQuery(
@@ -165,7 +160,8 @@ private:
     ASTSelectQuery & getSelectQuery() { return query_ptr->as<ASTSelectQuery &>(); }
 
     void addPrewhereAliasActions();
-    bool shouldMoveToPrewhere();
+    void applyFiltersToPrewhereInAnalysis(ExpressionAnalysisResult & analysis) const;
+    bool shouldMoveToPrewhere() const;
 
     Block getSampleBlockImpl();
 
@@ -173,13 +169,13 @@ private:
 
     /// Different stages of query execution.
     void executeFetchColumns(QueryProcessingStage::Enum processing_stage, QueryPlan & query_plan);
-    void executeWhere(QueryPlan & query_plan, const ActionsDAGPtr & expression, bool remove_filter);
+    void executeWhere(QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression, bool remove_filter);
     void executeAggregation(
-        QueryPlan & query_plan, const ActionsDAGPtr & expression, bool overflow_row, bool final, InputOrderInfoPtr group_by_info);
+        QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression, bool overflow_row, bool final, InputOrderInfoPtr group_by_info);
     void executeMergeAggregated(QueryPlan & query_plan, bool overflow_row, bool final, bool has_grouping_sets);
-    void executeTotalsAndHaving(QueryPlan & query_plan, bool has_having, const ActionsDAGPtr & expression, bool remove_filter, bool overflow_row, bool final);
-    void executeHaving(QueryPlan & query_plan, const ActionsDAGPtr & expression, bool remove_filter);
-    static void executeExpression(QueryPlan & query_plan, const ActionsDAGPtr & expression, const std::string & description);
+    void executeTotalsAndHaving(QueryPlan & query_plan, bool has_having, const ActionsAndProjectInputsFlagPtr & expression, bool remove_filter, bool overflow_row, bool final);
+    void executeHaving(QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression, bool remove_filter);
+    static void executeExpression(QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression, const std::string & description);
     /// FIXME should go through ActionsDAG to behave as a proper function
     void executeWindow(QueryPlan & query_plan);
     void executeOrder(QueryPlan & query_plan, InputOrderInfoPtr sorting_info);
@@ -190,12 +186,16 @@ private:
     void executeLimitBy(QueryPlan & query_plan);
     void executeLimit(QueryPlan & query_plan);
     void executeOffset(QueryPlan & query_plan);
-    static void executeProjection(QueryPlan & query_plan, const ActionsDAGPtr & expression);
+    static void executeProjection(QueryPlan & query_plan, const ActionsAndProjectInputsFlagPtr & expression);
     void executeDistinct(QueryPlan & query_plan, bool before_order, Names columns, bool pre_distinct);
     void executeExtremes(QueryPlan & query_plan);
     void executeSubqueriesInSetsAndJoins(QueryPlan & query_plan);
+    bool autoFinalOnQuery(ASTSelectQuery & select_query);
+    std::optional<UInt64> getTrivialCount(UInt64 allow_experimental_parallel_reading_from_replicas);
+    /// Check if we can limit block size to read based on LIMIT clause
+    UInt64 maxBlockSizeByLimit() const;
 
-    enum class Modificator
+    enum class Modificator : uint8_t
     {
         ROLLUP = 0,
         CUBE = 1,
@@ -224,6 +224,9 @@ private:
     /// For additional_filter setting.
     FilterDAGInfoPtr additional_filter_info;
 
+    /// For "per replica" filter when multiple replicas are used
+    FilterDAGInfoPtr parallel_replicas_custom_filter_info;
+
     QueryProcessingStage::Enum from_stage = QueryProcessingStage::FetchColumns;
 
     /// List of columns to read to execute the query.
@@ -232,7 +235,7 @@ private:
     Block source_header;
 
     /// Actions to calculate ALIAS if required.
-    ActionsDAGPtr alias_actions;
+    std::optional<ActionsDAG> alias_actions;
 
     /// The subquery interpreter, if the subquery
     std::unique_ptr<InterpreterSelectWithUnionQuery> interpreter_subquery;
@@ -245,7 +248,7 @@ private:
     /// Used when we read from prepared input, not table or subquery.
     std::optional<Pipe> input_pipe;
 
-    Poco::Logger * log;
+    LoggerPtr log;
     StorageMetadataPtr metadata_snapshot;
     StorageSnapshotPtr storage_snapshot;
 

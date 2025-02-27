@@ -1,8 +1,11 @@
-import pytest
-from helpers.cluster import ClickHouseCluster
+from multiprocessing.dummy import Pool
 from time import sleep
 
-from kazoo.client import KazooClient
+import pytest
+
+from helpers import keeper_utils
+from helpers.cluster import ClickHouseCluster
+from helpers.retry_decorator import retry
 
 # from kazoo.protocol.serialization import Connect, read_buffer, write_buffer
 
@@ -41,11 +44,7 @@ def started_cluster():
 
 
 def get_fake_zk(nodename, timeout=30.0):
-    _fake_zk_instance = KazooClient(
-        hosts=cluster.get_instance_ip(nodename) + ":9181", timeout=timeout
-    )
-    _fake_zk_instance.start()
-    return _fake_zk_instance
+    return keeper_utils.get_fake_zk(cluster, nodename, timeout=timeout)
 
 
 def destroy_zk_client(zk):
@@ -74,7 +73,18 @@ def wait_node(node):
         raise Exception("Can't wait node", node.name, "to become ready")
 
 
+def delete_keeper_snapshots_logs(nodex):
+    nodex.exec_in_container(
+        [
+            "bash",
+            "-c",
+            "rm -rf /var/lib/clickhouse/coordination/log /var/lib/clickhouse/coordination/snapshots",
+        ]
+    )
+
+
 def test_s3_upload(started_cluster):
+
     node1_zk = get_fake_zk(node1.name)
 
     # we defined in configs snapshot_distance as 50
@@ -88,15 +98,23 @@ def test_s3_upload(started_cluster):
             for obj in list(cluster.minio_client.list_objects("snapshots"))
         ]
 
-    saved_snapshots = get_saved_snapshots()
-    assert set(saved_snapshots) == set(
-        [
-            "snapshot_50.bin.zstd",
-            "snapshot_100.bin.zstd",
-            "snapshot_150.bin.zstd",
-            "snapshot_200.bin.zstd",
-        ]
-    )
+    def delete_s3_snapshots():
+        snapshots = cluster.minio_client.list_objects("snapshots")
+        for s in snapshots:
+            cluster.minio_client.remove_object("snapshots", s.object_name)
+
+    # Keeper sends snapshots asynchornously, hence we need to retry.
+    def _check_snapshots():
+        assert set(get_saved_snapshots()) == set(
+            [
+                "snapshot_50.bin.zstd",
+                "snapshot_100.bin.zstd",
+                "snapshot_150.bin.zstd",
+                "snapshot_200.bin.zstd",
+            ]
+        )
+
+    retry(AssertionError, retries=10, delay=2, jitter=0, backoff=1)(_check_snapshots)
 
     destroy_zk_client(node1_zk)
     node1.stop_clickhouse(kill=True)
@@ -108,9 +126,14 @@ def test_s3_upload(started_cluster):
     for _ in range(200):
         node2_zk.create("/test", sequence=True)
 
-    saved_snapshots = get_saved_snapshots()
+    def _check_snapshots_without_quorum():
+        assert len(get_saved_snapshots()) > 4
 
-    assert len(saved_snapshots) > 4
+    retry(AssertionError, retries=10, delay=2, jitter=0, backoff=1)(
+        _check_snapshots_without_quorum
+    )
+
+    _check_snapshots_without_quorum()
 
     success_upload_message = "Successfully uploaded"
     assert node2.contains_in_log(success_upload_message) or node3.contains_in_log(
@@ -118,3 +141,26 @@ def test_s3_upload(started_cluster):
     )
 
     destroy_zk_client(node2_zk)
+    node2.stop_clickhouse()
+    delete_keeper_snapshots_logs(node2)
+    node3.stop_clickhouse()
+    delete_keeper_snapshots_logs(node3)
+    delete_keeper_snapshots_logs(node1)
+    p = Pool(3)
+    waiters = []
+
+    def start_clickhouse(node):
+        node.start_clickhouse()
+
+    waiters.append(p.apply_async(start_clickhouse, args=(node1,)))
+    waiters.append(p.apply_async(start_clickhouse, args=(node2,)))
+    waiters.append(p.apply_async(start_clickhouse, args=(node3,)))
+
+    delete_s3_snapshots()  # for next iteration
+
+    for waiter in waiters:
+        waiter.wait()
+
+    keeper_utils.wait_until_connected(cluster, node1)
+    keeper_utils.wait_until_connected(cluster, node2)
+    keeper_utils.wait_until_connected(cluster, node3)

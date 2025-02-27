@@ -1,11 +1,13 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/groupbitor
-sidebar_position: 126
+slug: /sql-reference/aggregate-functions/reference/groupbitor
+sidebar_position: 152
+title: "groupBitOr"
+description: "Applies bit-wise `OR` to a series of numbers."
 ---
 
 # groupBitOr
 
-Applies bitwise `OR` for series of numbers.
+Applies bit-wise `OR` to a series of numbers.
 
 ``` sql
 groupBitOr(expr)
@@ -13,11 +15,11 @@ groupBitOr(expr)
 
 **Arguments**
 
-`expr` – An expression that results in `UInt*` type.
+`expr` – An expression that results in `UInt*` or `Int*` type.
 
 **Returned value**
 
-Value of the `UInt*` type.
+Value of the `UInt*` or `Int*` type.
 
 **Example**
 

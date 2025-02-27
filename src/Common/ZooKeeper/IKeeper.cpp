@@ -1,54 +1,38 @@
-#include <Common/ProfileEvents.h>
 #include <Common/ZooKeeper/IKeeper.h>
-
-
-namespace DB
-{
-    namespace ErrorCodes
-    {
-        extern const int KEEPER_EXCEPTION;
-    }
-}
-
-namespace ProfileEvents
-{
-    extern const Event ZooKeeperUserExceptions;
-    extern const Event ZooKeeperHardwareExceptions;
-    extern const Event ZooKeeperOtherExceptions;
-}
-
+#include <Common/ZooKeeper/KeeperException.h>
+#include <Common/thread_local_rng.h>
+#include <random>
 
 namespace Coordination
 {
 
-Exception::Exception(const std::string & msg, const Error code_, int)
-    : DB::Exception(msg, DB::ErrorCodes::KEEPER_EXCEPTION), code(code_)
+SimpleFaultInjection::SimpleFaultInjection(Float64 probability_before, Float64 probability_after_, const String & description_)
 {
-    if (Coordination::isUserError(code))
-        ProfileEvents::increment(ProfileEvents::ZooKeeperUserExceptions);
-    else if (Coordination::isHardwareError(code))
-        ProfileEvents::increment(ProfileEvents::ZooKeeperHardwareExceptions);
-    else
-        ProfileEvents::increment(ProfileEvents::ZooKeeperOtherExceptions);
+    if (likely(probability_before == 0.0) && likely(probability_after_ == 0.0))
+        return;
+
+    std::bernoulli_distribution fault(probability_before);
+    if (fault(thread_local_rng))
+        throw Coordination::Exception(Coordination::Error::ZCONNECTIONLOSS, "Fault injected (before {})", description_);
+
+    probability_after = probability_after_;
+    description = description_;
+    exceptions_level = std::uncaught_exceptions();
 }
 
-Exception::Exception(const std::string & msg, const Error code_)
-    : Exception(msg + " (" + errorMessage(code_) + ")", code_, 0)
+SimpleFaultInjection::~SimpleFaultInjection() noexcept(false)
 {
+    if (likely(probability_after == 0.0))
+        return;
+
+    /// Do not throw from dtor during unwinding
+    if (exceptions_level != std::uncaught_exceptions())
+        return;
+
+    std::bernoulli_distribution fault(probability_after);
+    if (fault(thread_local_rng))
+        throw Coordination::Exception(Coordination::Error::ZCONNECTIONLOSS, "Fault injected (after {})", description);
 }
-
-Exception::Exception(const Error code_)
-    : Exception(errorMessage(code_), code_, 0)
-{
-}
-
-Exception::Exception(const Error code_, const std::string & path)
-    : Exception(std::string{errorMessage(code_)} + ", path: " + path, code_, 0)
-{
-}
-
-Exception::Exception(const Exception & exc) = default;
-
 
 using namespace DB;
 
@@ -56,10 +40,10 @@ using namespace DB;
 static void addRootPath(String & path, const String & root_path)
 {
     if (path.empty())
-        throw Exception("Path cannot be empty", Error::ZBADARGUMENTS);
+        throw Exception::fromMessage(Error::ZBADARGUMENTS, "Path cannot be empty");
 
     if (path[0] != '/')
-        throw Exception("Path must begin with /, got path '" + path + "'", Error::ZBADARGUMENTS);
+        throw Exception(Error::ZBADARGUMENTS, "Path must begin with /, got path '{}'", path);
 
     if (root_path.empty())
         return;
@@ -76,7 +60,7 @@ static void removeRootPath(String & path, const String & root_path)
         return;
 
     if (path.size() <= root_path.size())
-        throw Exception("Received path is not longer than root_path", Error::ZDATAINCONSISTENCY);
+        throw Exception::fromMessage(Error::ZDATAINCONSISTENCY, "Received path is not longer than root_path");
 
     path = path.substr(root_path.size());
 }
@@ -110,9 +94,8 @@ const char * errorMessage(Error code)
         case Error::ZCLOSING:                 return "ZooKeeper is closing";
         case Error::ZNOTHING:                 return "(not error) no server responses to process";
         case Error::ZSESSIONMOVED:            return "Session moved to another server, so operation is ignored";
+        case Error::ZNOTREADONLY:             return "State-changing request is passed to read-only server";
     }
-
-    UNREACHABLE();
 }
 
 bool isHardwareError(Error zk_return_code)
@@ -122,7 +105,8 @@ bool isHardwareError(Error zk_return_code)
         || zk_return_code == Error::ZSESSIONMOVED
         || zk_return_code == Error::ZCONNECTIONLOSS
         || zk_return_code == Error::ZMARSHALLINGERROR
-        || zk_return_code == Error::ZOPERATIONTIMEOUT;
+        || zk_return_code == Error::ZOPERATIONTIMEOUT
+        || zk_return_code == Error::ZNOTREADONLY;
 }
 
 bool isUserError(Error zk_return_code)
@@ -137,6 +121,7 @@ bool isUserError(Error zk_return_code)
 
 void CreateRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void RemoveRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
+void RemoveRecursiveRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void ExistsRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void GetRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void SetRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
@@ -145,12 +130,6 @@ void CheckRequest::addRootPath(const String & root_path) { Coordination::addRoot
 void SetACLRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void GetACLRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
 void SyncRequest::addRootPath(const String & root_path) { Coordination::addRootPath(path, root_path); }
-
-void MultiRequest::addRootPath(const String & root_path)
-{
-    for (auto & request : requests)
-        request->addRootPath(root_path);
-}
 
 void CreateResponse::removeRootPath(const String & root_path) { Coordination::removeRootPath(path_created, root_path); }
 void WatchResponse::removeRootPath(const String & root_path) { Coordination::removeRootPath(path, root_path); }
@@ -162,4 +141,3 @@ void MultiResponse::removeRootPath(const String & root_path)
 }
 
 }
-

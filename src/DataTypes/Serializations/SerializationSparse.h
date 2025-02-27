@@ -27,7 +27,7 @@ public:
 
     Kind getKind() const override { return Kind::SPARSE; }
 
-    virtual void enumerateStreams(
+    void enumerateStreams(
         EnumerateStreamsSettings & settings,
         const StreamCallback & callback,
         const SubstreamData & data) const override;
@@ -43,7 +43,8 @@ public:
 
     void deserializeBinaryBulkStatePrefix(
         DeserializeBinaryBulkSettings & settings,
-        DeserializeBinaryBulkStatePtr & state) const override;
+        DeserializeBinaryBulkStatePtr & state,
+        SubstreamsDeserializeStatesCache * cache) const override;
 
     /// Allows to write ColumnSparse and other columns in sparse serialization.
     void serializeBinaryBulkWithMultipleStreams(
@@ -61,11 +62,11 @@ public:
         DeserializeBinaryBulkStatePtr & state,
         SubstreamsCache * cache) const override;
 
-    void serializeBinary(const Field & field, WriteBuffer & ostr) const override;
-    void deserializeBinary(Field & field, ReadBuffer & istr) const override;
+    void serializeBinary(const Field & field, WriteBuffer & ostr, const FormatSettings & settings) const override;
+    void deserializeBinary(Field & field, ReadBuffer & istr, const FormatSettings & settings) const override;
 
-    void serializeBinary(const IColumn & column, size_t row_num, WriteBuffer & ostr) const override;
-    void deserializeBinary(IColumn & column, ReadBuffer & istr) const override;
+    void serializeBinary(const IColumn & column, size_t row_num, WriteBuffer & ostr, const FormatSettings & settings) const override;
+    void deserializeBinary(IColumn & column, ReadBuffer & istr, const FormatSettings &) const override;
 
     void serializeTextEscaped(const IColumn & column, size_t row_num, WriteBuffer & ostr, const FormatSettings &) const override;
     void deserializeTextEscaped(IColumn & column, ReadBuffer & istr, const FormatSettings &) const override;
@@ -94,9 +95,12 @@ private:
             : offsets(offsets_), size(size_) {}
 
         DataTypePtr create(const DataTypePtr & prev) const override { return prev; }
-        SerializationPtr create(const SerializationPtr & prev) const override;
+        SerializationPtr create(const SerializationPtr & prev, const DataTypePtr &) const override;
         ColumnPtr create(const ColumnPtr & prev) const override;
     };
+
+    template <typename Reader>
+    void deserialize(IColumn & column, Reader && reader) const;
 
     SerializationPtr nested;
 };

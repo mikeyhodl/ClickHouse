@@ -1,7 +1,9 @@
 ---
-slug: /en/engines/table-engines/special/url
+slug: /engines/table-engines/special/url
 sidebar_position: 80
 sidebar_label:  URL
+title: "URL Table Engine"
+description: "Queries data to/from a remote HTTP/HTTPS server. This engine is similar to the File engine."
 ---
 
 # URL Table Engine
@@ -14,7 +16,7 @@ Syntax: `URL(URL [,Format] [,CompressionMethod])`
 
 - The `Format` must be one that ClickHouse can use in `SELECT` queries and, if necessary, in `INSERTs`. For the full list of supported formats, see [Formats](../../../interfaces/formats.md#formats).
 
-    If this argument is not specified, ClickHouse detectes the format automatically from the suffix of the `URL` parameter. If the suffix of `URL` parameter does not match any supported formats, it fails to create table. For example, for engine expression `URL('http://localhost/test.json')`, `JSON` format is applied.
+    If this argument is not specified, ClickHouse detects the format automatically from the suffix of the `URL` parameter. If the suffix of `URL` parameter does not match any supported formats, it fails to create table. For example, for engine expression `URL('http://localhost/test.json')`, `JSON` format is applied.
 
 - `CompressionMethod` indicates that whether the HTTP body should be compressed. If the compression is enabled, the HTTP packets sent by the URL engine contain 'Content-Encoding' header to indicate which compression method is used.
 
@@ -91,9 +93,21 @@ SELECT * FROM url_engine_table
 
 ## Details of Implementation {#details-of-implementation}
 
--   Reads and writes can be parallel
--   Not supported:
-    -   `ALTER` and `SELECT...SAMPLE` operations.
-    -   Indexes.
-    -   Replication.
+- Reads and writes can be parallel
+- Not supported:
+    - `ALTER` and `SELECT...SAMPLE` operations.
+    - Indexes.
+    - Replication.
 
+## Virtual Columns {#virtual-columns}
+
+- `_path` — Path to the `URL`. Type: `LowCardinality(String)`.
+- `_file` — Resource name of the `URL`. Type: `LowCardinality(String)`.
+- `_size` — Size of the resource in bytes. Type: `Nullable(UInt64)`. If the size is unknown, the value is `NULL`.
+- `_time` — Last modified time of the file. Type: `Nullable(DateTime)`. If the time is unknown, the value is `NULL`.
+- `_headers` - HTTP response headers. Type: `Map(LowCardinality(String), LowCardinality(String))`.
+
+## Storage Settings {#storage-settings}
+
+- [engine_url_skip_empty_files](/docs/operations/settings/settings.md#engine_url_skip_empty_files) - allows to skip empty files while reading. Disabled by default.
+- [enable_url_encoding](/docs/operations/settings/settings.md#enable_url_encoding) - allows to enable/disable decoding/encoding path in uri. Enabled by default.

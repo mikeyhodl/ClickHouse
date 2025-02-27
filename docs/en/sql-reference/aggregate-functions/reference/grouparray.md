@@ -1,6 +1,8 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/grouparray
-sidebar_position: 110
+slug: /sql-reference/aggregate-functions/reference/grouparray
+sidebar_position: 139
+title: "groupArray"
+description: "Creates an array of argument values. Values can be added to the array in any (indeterminate) order."
 ---
 
 # groupArray
@@ -12,7 +14,7 @@ Values can be added to the array in any (indeterminate) order.
 
 The second version (with the `max_size` parameter) limits the size of the resulting array to `max_size` elements. For example, `groupArray(1)(x)` is equivalent to `[any (x)]`.
 
-In some cases, you can still rely on the order of execution. This applies to cases when `SELECT` comes from a subquery that uses `ORDER BY`.
+In some cases, you can still rely on the order of execution. This applies to cases when `SELECT` comes from a subquery that uses `ORDER BY` if the subquery result is small enough.
 
 **Example**
 
@@ -44,3 +46,5 @@ Result:
 ```
 
 The groupArray function will remove ᴺᵁᴸᴸ value based on the above results.
+
+- Alias: `array_agg`.

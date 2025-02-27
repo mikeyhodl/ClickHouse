@@ -11,7 +11,7 @@ sidebar_label: "Функции для работы с системой Geohash"
 
 ## geohashEncode {#geohashencode}
 
-Кодирует широту и долготу в строку [geohash](#geohash).
+Кодирует широту и долготу в строку [geohash](/ru/sql-reference/functions/geo/geohash).
 
 ``` sql
 geohashEncode(longitude, latitude, [precision])
@@ -41,7 +41,7 @@ SELECT geohashEncode(-5.60302734375, 42.593994140625, 0) AS res;
 
 ## geohashDecode {#geohashdecode}
 
-Декодирует любую строку, закодированную в [geohash](#geohash), на долготу и широту.
+Декодирует любую строку, закодированную в [geohash](/ru/sql-reference/functions/geo/geohash), на долготу и широту.
 
 ``` sql
 geohashDecode(geohash_string)
@@ -69,7 +69,7 @@ SELECT geohashDecode('ezs42') AS res;
 
 ## geohashesInBox {#geohashesinbox}
 
-Формирует массив участков, которые находятся внутри или пересекают границу заданного участка на поверхности. Каждый участок описывается строкой [geohash](#geohash) заданной точности.
+Формирует массив участков, которые находятся внутри или пересекают границу заданного участка на поверхности. Каждый участок описывается строкой [geohash](/ru/sql-reference/functions/geo/geohash) заданной точности.
 
 **Синтаксис**
 
@@ -85,8 +85,8 @@ geohashesInBox(longitude_min, latitude_min, longitude_max, latitude_max, precisi
 -   `latitude_max` — максимальная широта. Диапазон возможных значений: `[-90°, 90°]`. Тип данных: [Float](../../../sql-reference/data-types/float.md).
 -   `precision` — точность geohash. Диапазон возможных значений: `[1, 12]`. Тип данных: [UInt8](../../../sql-reference/data-types/int-uint.md).
 
-:::info "Замечание"
-    Все передаваемые координаты должны быть одного и того же типа: либо `Float32`, либо `Float64`.
+:::info Замечание
+Все передаваемые координаты должны быть одного и того же типа: либо `Float32`, либо `Float64`.
 :::
 
 **Возвращаемые значения**
@@ -96,8 +96,8 @@ geohashesInBox(longitude_min, latitude_min, longitude_max, latitude_max, precisi
 
 Тип данных: [Array](../../../sql-reference/data-types/array.md)([String](../../../sql-reference/data-types/string.md)).
 
-:::info "Замечание"
-    Если возвращаемый массив содержит свыше 10 000 000 элементов, функция сгенерирует исключение.
+:::info Замечание
+Если возвращаемый массив содержит свыше 10 000 000 элементов, функция сгенерирует исключение.
 :::
 
 **Пример**
@@ -115,4 +115,3 @@ SELECT geohashesInBox(24.48, 40.56, 24.785, 40.81, 4) AS thasos;
 │ ['sx1q','sx1r','sx32','sx1w','sx1x','sx38'] │
 └─────────────────────────────────────────────┘
 ```
-

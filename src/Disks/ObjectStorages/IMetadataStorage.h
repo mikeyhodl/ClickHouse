@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 #include <unordered_map>
 #include <Poco/Timestamp.h>
@@ -11,6 +12,7 @@
 #include <Disks/DirectoryIterator.h>
 #include <Disks/WriteMode.h>
 #include <Disks/ObjectStorages/IObjectStorage.h>
+#include <Disks/DiskType.h>
 #include <Common/ErrorCodes.h>
 
 namespace DB
@@ -22,6 +24,23 @@ namespace ErrorCodes
 }
 
 class IMetadataStorage;
+
+/// Return the result of operation to the caller.
+/// It is used in `IDiskObjectStorageOperation::finalize` after metadata transaction executed to make decision on blob removal.
+struct UnlinkMetadataFileOperationOutcome
+{
+    UInt32 num_hardlinks = std::numeric_limits<UInt32>::max();
+};
+
+struct TruncateFileOperationOutcome
+{
+    StoredObjects objects_to_remove;
+};
+
+
+using UnlinkMetadataFileOperationOutcomePtr = std::shared_ptr<UnlinkMetadataFileOperationOutcome>;
+using TruncateFileOperationOutcomePtr = std::shared_ptr<TruncateFileOperationOutcome>;
+
 
 /// Tries to provide some "transactions" interface, which allow
 /// to execute (commit) operations simultaneously. We don't provide
@@ -40,6 +59,12 @@ public:
 
     /// Write metadata string to file
     virtual void writeStringToFile(const std::string & /* path */, const std::string & /* data */)
+    {
+        throwNotImplemented();
+    }
+
+    /// Writes the data inline with the metadata
+    virtual void writeInlineDataToFile(const std::string & /* path */, const std::string & /* data */)
     {
         throwNotImplemented();
     }
@@ -110,25 +135,33 @@ public:
     /// Create empty file in metadata storage
     virtual void createEmptyMetadataFile(const std::string & path) = 0;
 
+    virtual void createEmptyFile(const std::string & /* path */) {}
+
     /// Create metadata file on paths with content (blob_name, size_in_bytes)
-    virtual void createMetadataFile(const std::string & path, const std::string & blob_name, uint64_t size_in_bytes) = 0;
+    virtual void createMetadataFile(const std::string & path, ObjectStorageKey key, uint64_t size_in_bytes) = 0;
 
     /// Add to new blob to metadata file (way to implement appends)
-    virtual void addBlobToMetadata(const std::string & /* path */, const std::string & /* blob_name */, uint64_t /* size_in_bytes */)
+    virtual void addBlobToMetadata(const std::string & /* path */, ObjectStorageKey /* key */, uint64_t /* size_in_bytes */)
     {
         throwNotImplemented();
     }
 
     /// Unlink metadata file and do something special if required
     /// By default just remove file (unlink file).
-    virtual void unlinkMetadata(const std::string & path)
+    virtual UnlinkMetadataFileOperationOutcomePtr unlinkMetadata(const std::string & path)
     {
         unlinkFile(path);
+        return nullptr;
+    }
+
+    virtual TruncateFileOperationOutcomePtr truncateFile(const std::string & /* path */, size_t /* size */)
+    {
+        throwNotImplemented();
     }
 
     virtual ~IMetadataTransaction() = default;
 
-private:
+protected:
     [[noreturn]] static void throwNotImplemented()
     {
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Operation is not implemented");
@@ -143,22 +176,41 @@ using MetadataTransactionPtr = std::shared_ptr<IMetadataTransaction>;
 class IMetadataStorage : private boost::noncopyable
 {
 public:
-    virtual MetadataTransactionPtr createTransaction() const = 0;
+    virtual MetadataTransactionPtr createTransaction() = 0;
 
     /// Get metadata root path.
     virtual const std::string & getPath() const = 0;
 
+    virtual MetadataStorageType getType() const = 0;
+
+    /// Returns true if empty file can be created without any blobs in the corresponding object storage.
+    /// E.g. metadata storage can store the empty list of blobs corresponding to a file without actually storing any blobs.
+    /// But if the metadata storage just relies on for example local FS to store data under logical path, then a file has to be created even if it's empty.
+    virtual bool supportsEmptyFilesWithoutBlobs() const { return false; }
+
     /// ==== General purpose methods. Define properties of object storage file based on metadata files ====
 
-    virtual bool exists(const std::string & path) const = 0;
-
-    virtual bool isFile(const std::string & path) const = 0;
-
-    virtual bool isDirectory(const std::string & path) const = 0;
+    virtual bool existsFile(const std::string & path) const = 0;
+    virtual bool existsDirectory(const std::string & path) const = 0;
+    virtual bool existsFileOrDirectory(const std::string & path) const = 0;
 
     virtual uint64_t getFileSize(const std::string & path) const = 0;
 
+    virtual std::optional<uint64_t> getFileSizeIfExists(const std::string & path) const
+    {
+        if (existsFile(path))
+            return getFileSize(path);
+        return std::nullopt;
+    }
+
     virtual Poco::Timestamp getLastModified(const std::string & path) const = 0;
+
+    virtual std::optional<Poco::Timestamp> getLastModifiedIfExists(const std::string & path) const
+    {
+        if (existsFileOrDirectory(path))
+            return getLastModified(path);
+        return std::nullopt;
+    }
 
     virtual time_t getLastChanged(const std::string & /* path */) const
     {
@@ -185,6 +237,25 @@ public:
         throwNotImplemented();
     }
 
+    /// Read inline data for file to string from path
+    virtual std::string readInlineDataToString(const std::string & /* path */) const
+    {
+        throwNotImplemented();
+    }
+
+    virtual void shutdown()
+    {
+        /// This method is overridden for specific metadata implementations in ClickHouse Cloud.
+    }
+
+    /// If the state can be changed under the hood and become outdated in memory, perform a reload if necessary.
+    /// Note: for performance reasons, it's allowed to assume that only some subset of changes are possible
+    /// (those that MergeTree tables can make).
+    virtual void refresh()
+    {
+        /// The default no-op implementation when the state in memory cannot be out of sync of the actual state.
+    }
+
     virtual ~IMetadataStorage() = default;
 
     /// ==== More specific methods. Previous were almost general purpose. ====
@@ -199,9 +270,14 @@ public:
     /// object_storage_path is absolute.
     virtual StoredObjects getStorageObjects(const std::string & path) const = 0;
 
-    virtual std::string getObjectStorageRootPath() const = 0;
+    virtual std::optional<StoredObjects> getStorageObjectsIfExist(const std::string & path) const
+    {
+        if (existsFile(path))
+            return getStorageObjects(path);
+        return std::nullopt;
+    }
 
-private:
+protected:
     [[noreturn]] static void throwNotImplemented()
     {
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Operation is not implemented");

@@ -1,5 +1,5 @@
 ---
-slug: /en/sql-reference/aggregate-functions/combinators
+slug: /sql-reference/aggregate-functions/combinators
 sidebar_position: 37
 sidebar_label: Combinators
 ---
@@ -8,7 +8,7 @@ sidebar_label: Combinators
 
 The name of an aggregate function can have a suffix appended to it. This changes the way the aggregate function works.
 
-## -If
+## -If {#-if}
 
 The suffix -If can be appended to the name of any aggregate function. In this case, the aggregate function accepts an extra argument – a condition (Uint8 type). The aggregate function processes only the rows that trigger the condition. If the condition was not triggered even once, it returns a default value (usually zeros or empty strings).
 
@@ -16,23 +16,50 @@ Examples: `sumIf(column, cond)`, `countIf(cond)`, `avgIf(x, cond)`, `quantilesTi
 
 With conditional aggregate functions, you can calculate aggregates for several conditions at once, without using subqueries and `JOIN`s. For example, conditional aggregate functions can be used to implement the segment comparison functionality.
 
-## -Array
+## -Array {#-array}
 
-The -Array suffix can be appended to any aggregate function. In this case, the aggregate function takes arguments of the ‘Array(T)’ type (arrays) instead of ‘T’ type arguments. If the aggregate function accepts multiple arguments, this must be arrays of equal lengths. When processing arrays, the aggregate function works like the original aggregate function across all array elements.
+The -Array suffix can be appended to any aggregate function. In this case, the aggregate function takes arguments of the 'Array(T)' type (arrays) instead of 'T' type arguments. If the aggregate function accepts multiple arguments, this must be arrays of equal lengths. When processing arrays, the aggregate function works like the original aggregate function across all array elements.
 
-Example 1: `sumArray(arr)` - Totals all the elements of all ‘arr’ arrays. In this example, it could have been written more simply: `sum(arraySum(arr))`.
+Example 1: `sumArray(arr)` - Totals all the elements of all 'arr' arrays. In this example, it could have been written more simply: `sum(arraySum(arr))`.
 
-Example 2: `uniqArray(arr)` – Counts the number of unique elements in all ‘arr’ arrays. This could be done an easier way: `uniq(arrayJoin(arr))`, but it’s not always possible to add ‘arrayJoin’ to a query.
+Example 2: `uniqArray(arr)` – Counts the number of unique elements in all 'arr' arrays. This could be done an easier way: `uniq(arrayJoin(arr))`, but it's not always possible to add 'arrayJoin' to a query.
 
--If and -Array can be combined. However, ‘Array’ must come first, then ‘If’. Examples: `uniqArrayIf(arr, cond)`, `quantilesTimingArrayIf(level1, level2)(arr, cond)`. Due to this order, the ‘cond’ argument won’t be an array.
+-If and -Array can be combined. However, 'Array' must come first, then 'If'. Examples: `uniqArrayIf(arr, cond)`, `quantilesTimingArrayIf(level1, level2)(arr, cond)`. Due to this order, the 'cond' argument won't be an array.
 
-## -Map
+## -Map {#-map}
 
 The -Map suffix can be appended to any aggregate function. This will create an aggregate function which gets Map type as an argument, and aggregates values of each key of the map separately using the specified aggregate function. The result is also of a Map type.
 
-Examples: `sumMap(map(1,1))`, `avgMap(map('a', 1))`.
+**Example**
 
-## -SimpleState
+```sql
+CREATE TABLE map_map(
+    date Date,
+    timeslot DateTime,
+    status Map(String, UInt64)
+) ENGINE = Log;
+
+INSERT INTO map_map VALUES
+    ('2000-01-01', '2000-01-01 00:00:00', (['a', 'b', 'c'], [10, 10, 10])),
+    ('2000-01-01', '2000-01-01 00:00:00', (['c', 'd', 'e'], [10, 10, 10])),
+    ('2000-01-01', '2000-01-01 00:01:00', (['d', 'e', 'f'], [10, 10, 10])),
+    ('2000-01-01', '2000-01-01 00:01:00', (['f', 'g', 'g'], [10, 10, 10]));
+
+SELECT
+    timeslot,
+    sumMap(status),
+    avgMap(status),
+    minMap(status)
+FROM map_map
+GROUP BY timeslot;
+
+┌────────────timeslot─┬─sumMap(status)───────────────────────┬─avgMap(status)───────────────────────┬─minMap(status)───────────────────────┐
+│ 2000-01-01 00:00:00 │ {'a':10,'b':10,'c':20,'d':10,'e':10} │ {'a':10,'b':10,'c':10,'d':10,'e':10} │ {'a':10,'b':10,'c':10,'d':10,'e':10} │
+│ 2000-01-01 00:01:00 │ {'d':10,'e':10,'f':20,'g':20}        │ {'d':10,'e':10,'f':10,'g':10}        │ {'d':10,'e':10,'f':10,'g':10}        │
+└─────────────────────┴──────────────────────────────────────┴──────────────────────────────────────┴──────────────────────────────────────┘
+```
+
+## -SimpleState {#-simplestate}
 
 If you apply this combinator, the aggregate function returns the same value but with a different type. This is a [SimpleAggregateFunction(...)](../../sql-reference/data-types/simpleaggregatefunction.md) that can be stored in a table to work with [AggregatingMergeTree](../../engines/table-engines/mergetree-family/aggregatingmergetree.md) tables.
 
@@ -44,7 +71,7 @@ If you apply this combinator, the aggregate function returns the same value but 
 
 **Arguments**
 
--   `x` — Aggregate function parameters.
+- `x` — Aggregate function parameters.
 
 **Returned values**
 
@@ -66,36 +93,40 @@ Result:
 └──────────────────────────────────────┴───┘
 ```
 
-## -State
+## -State {#-state}
 
 If you apply this combinator, the aggregate function does not return the resulting value (such as the number of unique values for the [uniq](../../sql-reference/aggregate-functions/reference/uniq.md#agg_function-uniq) function), but an intermediate state of the aggregation (for `uniq`, this is the hash table for calculating the number of unique values). This is an `AggregateFunction(...)` that can be used for further processing or stored in a table to finish aggregating later.
 
+:::note
+Please notice, that -MapState is not an invariant for the same data due to the fact that order of data in intermediate state can change, though it doesn't impact ingestion of this data.
+:::
+
 To work with these states, use:
 
--   [AggregatingMergeTree](../../engines/table-engines/mergetree-family/aggregatingmergetree.md) table engine.
--   [finalizeAggregation](../../sql-reference/functions/other-functions.md#function-finalizeaggregation) function.
--   [runningAccumulate](../../sql-reference/functions/other-functions.md#runningaccumulate) function.
--   [-Merge](#aggregate_functions_combinators-merge) combinator.
--   [-MergeState](#aggregate_functions_combinators-mergestate) combinator.
+- [AggregatingMergeTree](../../engines/table-engines/mergetree-family/aggregatingmergetree.md) table engine.
+- [finalizeAggregation](../../sql-reference/functions/other-functions.md#function-finalizeaggregation) function.
+- [runningAccumulate](../../sql-reference/functions/other-functions.md#runningaccumulate) function.
+- [-Merge](#-merge) combinator.
+- [-MergeState](#-mergestate) combinator.
 
-## -Merge
+## -Merge {#-merge}
 
 If you apply this combinator, the aggregate function takes the intermediate aggregation state as an argument, combines the states to finish aggregation, and returns the resulting value.
 
-## -MergeState
+## -MergeState {#-mergestate}
 
 Merges the intermediate aggregation states in the same way as the -Merge combinator. However, it does not return the resulting value, but an intermediate aggregation state, similar to the -State combinator.
 
-## -ForEach
+## -ForEach {#-foreach}
 
 Converts an aggregate function for tables into an aggregate function for arrays that aggregates the corresponding array items and returns an array of results. For example, `sumForEach` for the arrays `[1, 2]`, `[3, 4, 5]`and`[6, 7]`returns the result `[10, 13, 5]` after adding together the corresponding array items.
 
-## -Distinct
+## -Distinct {#-distinct}
 
 Every unique combination of arguments will be aggregated only once. Repeating values are ignored.
-Examples: `sum(DISTINCT x)`, `groupArray(DISTINCT x)`, `corrStableDistinct(DISTINCT x, y)` and so on.
+Examples: `sum(DISTINCT x)` (or `sumDistinct(x)`), `groupArray(DISTINCT x)` (or `groupArrayDistinct(x)`), `corrStable(DISTINCT x, y)` (or `corrStableDistinct(x, y)`) and so on.
 
-## -OrDefault
+## -OrDefault {#-ordefault}
 
 Changes behavior of an aggregate function.
 
@@ -111,11 +142,11 @@ If an aggregate function does not have input values, with this combinator it ret
 
 **Arguments**
 
--   `x` — Aggregate function parameters.
+- `x` — Aggregate function parameters.
 
 **Returned values**
 
-Returns the default value of an aggregate function’s return type if there is nothing to aggregate.
+Returns the default value of an aggregate function's return type if there is nothing to aggregate.
 
 Type depends on the aggregate function used.
 
@@ -155,7 +186,7 @@ Result:
 └───────────────────────────────────┘
 ```
 
-## -OrNull
+## -OrNull {#-ornull}
 
 Changes behavior of an aggregate function.
 
@@ -171,12 +202,12 @@ This combinator converts a result of an aggregate function to the [Nullable](../
 
 **Arguments**
 
--   `x` — Aggregate function parameters.
+- `x` — Aggregate function parameters.
 
 **Returned values**
 
--   The result of the aggregate function, converted to the `Nullable` data type.
--   `NULL`, if there is nothing to aggregate.
+- The result of the aggregate function, converted to the `Nullable` data type.
+- `NULL`, if there is nothing to aggregate.
 
 Type: `Nullable(aggregate function return type)`.
 
@@ -218,7 +249,7 @@ Result:
 └────────────────────────────────┘
 ```
 
-## -Resample
+## -Resample {#-resample}
 
 Lets you divide data into groups, and then separately aggregates the data in those groups. Groups are created by splitting the values from one column into intervals.
 
@@ -228,15 +259,15 @@ Lets you divide data into groups, and then separately aggregates the data in tho
 
 **Arguments**
 
--   `start` — Starting value of the whole required interval for `resampling_key` values.
--   `stop` — Ending value of the whole required interval for `resampling_key` values. The whole interval does not include the `stop` value `[start, stop)`.
--   `step` — Step for separating the whole interval into subintervals. The `aggFunction` is executed over each of those subintervals independently.
--   `resampling_key` — Column whose values are used for separating data into intervals.
--   `aggFunction_params` — `aggFunction` parameters.
+- `start` — Starting value of the whole required interval for `resampling_key` values.
+- `stop` — Ending value of the whole required interval for `resampling_key` values. The whole interval does not include the `stop` value `[start, stop)`.
+- `step` — Step for separating the whole interval into subintervals. The `aggFunction` is executed over each of those subintervals independently.
+- `resampling_key` — Column whose values are used for separating data into intervals.
+- `aggFunction_params` — `aggFunction` parameters.
 
 **Returned values**
 
--   Array of `aggFunction` results for each subinterval.
+- Array of `aggFunction` results for each subinterval.
 
 **Example**
 
@@ -253,9 +284,9 @@ Consider the `people` table with the following data:
 └────────┴─────┴──────┘
 ```
 
-Let’s get the names of the people whose age lies in the intervals of `[30,60)` and `[60,75)`. Since we use integer representation for age, we get ages in the `[30, 59]` and `[60,74]` intervals.
+Let's get the names of the people whose age lies in the intervals of `[30,60)` and `[60,75)`. Since we use integer representation for age, we get ages in the `[30, 59]` and `[60,74]` intervals.
 
-To aggregate names in an array, we use the [groupArray](../../sql-reference/aggregate-functions/reference/grouparray.md#agg_function-grouparray) aggregate function. It takes one argument. In our case, it’s the `name` column. The `groupArrayResample` function should use the `age` column to aggregate names by age. To define the required intervals, we pass the `30, 75, 30` arguments into the `groupArrayResample` function.
+To aggregate names in an array, we use the [groupArray](../../sql-reference/aggregate-functions/reference/grouparray.md#agg_function-grouparray) aggregate function. It takes one argument. In our case, it's the `name` column. The `groupArrayResample` function should use the `age` column to aggregate names by age. To define the required intervals, we pass the `30, 75, 30` arguments into the `groupArrayResample` function.
 
 ``` sql
 SELECT groupArrayResample(30, 75, 30)(name, age) FROM people
@@ -269,9 +300,9 @@ SELECT groupArrayResample(30, 75, 30)(name, age) FROM people
 
 Consider the results.
 
-`Jonh` is out of the sample because he’s too young. Other people are distributed according to the specified age intervals.
+`John` is out of the sample because he's too young. Other people are distributed according to the specified age intervals.
 
-Now let’s count the total number of people and their average wage in the specified age intervals.
+Now let's count the total number of people and their average wage in the specified age intervals.
 
 ``` sql
 SELECT
@@ -286,3 +317,16 @@ FROM people
 └────────┴───────────────────────────┘
 ```
 
+## -ArgMin {#-argmin}
+
+The suffix -ArgMin can be appended to the name of any aggregate function. In this case, the aggregate function accepts an additional argument, which should be any comparable expression. The aggregate function processes only the rows that have the minimum value for the specified extra expression.
+
+Examples: `sumArgMin(column, expr)`, `countArgMin(expr)`, `avgArgMin(x, expr)` and so on.
+
+## -ArgMax {#-argmax}
+
+Similar to suffix -ArgMin but processes only the rows that have the maximum value for the specified extra expression.
+
+## Related Content {#related-content}
+
+- Blog: [Using Aggregate Combinators in ClickHouse](https://clickhouse.com/blog/aggregate-functions-combinators-in-clickhouse-for-arrays-maps-and-states)

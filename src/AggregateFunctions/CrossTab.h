@@ -98,8 +98,8 @@ struct CrossTabData
         Float64 chi_squared = 0;
         for (const auto & [key, value_ab] : count_ab)
         {
-            Float64 value_a = count_a.at(key.items[0]);
-            Float64 value_b = count_b.at(key.items[1]);
+            Float64 value_a = count_a.at(key.items[UInt128::_impl::little(0)]);
+            Float64 value_b = count_b.at(key.items[UInt128::_impl::little(1)]);
 
             Float64 expected_value_ab = (value_a * value_b) / count;
 
@@ -114,11 +114,11 @@ struct CrossTabData
 
 
 template <typename Data>
-class AggregateFunctionCrossTab : public IAggregateFunctionDataHelper<Data, AggregateFunctionCrossTab<Data>>
+class AggregateFunctionCrossTab final : public IAggregateFunctionDataHelper<Data, AggregateFunctionCrossTab<Data>>
 {
 public:
     explicit AggregateFunctionCrossTab(const DataTypes & arguments)
-        : IAggregateFunctionDataHelper<Data, AggregateFunctionCrossTab<Data>>({arguments}, {})
+        : IAggregateFunctionDataHelper<Data, AggregateFunctionCrossTab<Data>>({arguments}, {}, createResultType())
     {
     }
 
@@ -132,7 +132,7 @@ public:
         return false;
     }
 
-    DataTypePtr getReturnType() const override
+    static DataTypePtr createResultType()
     {
         return std::make_shared<DataTypeNumber<Float64>>();
     }

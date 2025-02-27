@@ -1,25 +1,21 @@
 ---
-slug: /en/development/continuous-integration
-sidebar_position: 62
-sidebar_label: Continuous Integration Checks
-title: Continuous Integration Checks
-description: When you submit a pull request, some automated checks are ran for your code by the ClickHouse continuous integration (CI) system
+slug: /development/continuous-integration
+sidebar_position: 55
+sidebar_label: Continuous Integration (CI)
 ---
 
-When you submit a pull request, some automated checks are ran for your code by
-the ClickHouse [continuous integration (CI) system](tests.md#test-automation).
-This happens after a repository maintainer (someone from ClickHouse team) has
-screened your code and added the `can be tested` label to your pull request.
-The results of the checks are listed on the GitHub pull request page as
-described in the [GitHub checks
-documentation](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-status-checks).
-If a check is failing, you might be required to fix it. This page gives an
-overview of checks you may encounter, and what you can do to fix them.
+# Continuous Integration (CI)
 
-If it looks like the check failure is not related to your changes, it may be
-some transient failure or an infrastructure problem. Push an empty commit to
-the pull request to restart the CI checks:
-```
+When you submit a pull request, some automated checks are ran for your code by the ClickHouse [continuous integration (CI) system](tests.md#test-automation).
+This happens after a repository maintainer (someone from ClickHouse team) has screened your code and added the `can be tested` label to your pull request.
+The results of the checks are listed on the GitHub pull request page as described in the [GitHub checks documentation](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/about-status-checks).
+If a check is failing, you might be required to fix it.
+This page gives an overview of checks you may encounter, and what you can do to fix them.
+
+If it looks like the check failure is not related to your changes, it may be some transient failure or an infrastructure problem.
+Push an empty commit to the pull request to restart the CI checks:
+
+```shell
 git reset
 git commit --allow-empty
 git push
@@ -27,67 +23,105 @@ git push
 
 If you are not sure what to do, ask a maintainer for help.
 
+## Merge with Master {#merge-with-master}
 
-## Merge With Master
+Verifies that the PR can be merged to master.
+If not, it will fail with a message `Cannot fetch mergecommit`.
+To fix this check, resolve the conflict as described in the [GitHub documentation](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/resolving-a-merge-conflict-on-github), or merge the `master` branch to your pull request branch using git.
 
-Verifies that the PR can be merged to master. If not, it will fail with the
-message `Cannot fetch mergecommit`. To fix this check, resolve the conflict as
-described in the [GitHub
-documentation](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/resolving-a-merge-conflict-on-github),
-or merge the `master` branch to your pull request branch using git.
+## Docs check {#docs-check}
 
+Tries to build the ClickHouse documentation website.
+It can fail if you changed something in the documentation.
+Most probable reason is that some cross-link in the documentation is wrong.
+Go to the check report and look for `ERROR` and `WARNING` messages.
 
-## Docs check
+## Description Check {#description-check}
 
-Tries to build the ClickHouse documentation website. It can fail if you changed
-something in the documentation. Most probable reason is that some cross-link in
-the documentation is wrong. Go to the check report and look for `ERROR` and `WARNING` messages.
+Check that the description of your pull request conforms to the template [PULL_REQUEST_TEMPLATE.md](https://github.com/ClickHouse/ClickHouse/blob/master/.github/PULL_REQUEST_TEMPLATE.md).
+You have to specify a changelog category for your change (e.g., Bug Fix), and write a user-readable message describing the change for [CHANGELOG.md](../whats-new/changelog/index.md)
 
-### Report Details
-
-- [Status page example](https://clickhouse-test-reports.s3.yandex.net/12550/eabcc293eb02214caa6826b7c15f101643f67a6b/docs_check.html)
-- `docs_output.txt` contains the building log. [Successful result example](https://clickhouse-test-reports.s3.yandex.net/12550/eabcc293eb02214caa6826b7c15f101643f67a6b/docs_check/docs_output.txt)
-
-
-## Description Check
-
-Check that the description of your pull request conforms to the template
-[PULL_REQUEST_TEMPLATE.md](https://github.com/ClickHouse/ClickHouse/blob/master/.github/PULL_REQUEST_TEMPLATE.md).
-You have to specify a changelog category for your change (e.g., Bug Fix), and
-write a user-readable message describing the change for [CHANGELOG.md](../whats-new/changelog/index.md)
-
-
-## Push To DockerHub
+## Push To DockerHub {#push-to-dockerhub}
 
 Builds docker images used for build and tests, then pushes them to DockerHub.
 
+## Marker Check {#marker-check}
 
-## Marker Check
+This check means that the CI system started to process the pull request.
+When it has 'pending' status, it means that not all checks have been started yet.
+After all checks have been started, it changes status to 'success'.
 
-This check means that the CI system started to process the pull request. When it has 'pending' status, it means that not all checks have been started yet. After all checks have been started, it changes status to 'success'.
-
-
-## Style Check
+## Style Check {#style-check}
 
 Performs some simple regex-based checks of code style, using the [`utils/check-style/check-style`](https://github.com/ClickHouse/ClickHouse/blob/master/utils/check-style/check-style) binary (note that it can be run locally).
 If it fails, fix the style errors following the [code style guide](style.md).
 
-### Report Details
-- [Status page example](https://clickhouse-test-reports.s3.yandex.net/12550/659c78c7abb56141723af6a81bfae39335aa8cb2/style_check.html)
-- `output.txt` contains the check resulting errors (invalid tabulation etc), blank page means no errors. [Successful result example](https://clickhouse-test-reports.s3.yandex.net/12550/659c78c7abb56141723af6a81bfae39335aa8cb2/style_check/output.txt).
+#### Running style check locally: {#running-style-check-locally}
 
+```sh
+mkdir -p /tmp/test_output
+# running all checks
+python3 tests/ci/style_check.py --no-push
 
-## Fast Test
-Normally this is the first check that is ran for a PR. It builds ClickHouse and
-runs most of [stateless functional tests](tests.md#functional-tests), omitting
-some. If it fails, further checks are not started until it is fixed. Look at
-the report to see which tests fail, then reproduce the failure locally as
-described [here](tests.md#functional-test-locally).
+# run specified check script (e.g.: ./check-mypy)
+docker run --rm --volume=.:/ClickHouse --volume=/tmp/test_output:/test_output -u $(id -u ${USER}):$(id -g ${USER}) --cap-add=SYS_PTRACE --entrypoint= -w/ClickHouse/utils/check-style clickhouse/style-test ./check-mypy
 
-### Report Details
-[Status page example](https://clickhouse-test-reports.s3.yandex.net/12550/67d716b5cc3987801996c31a67b31bf141bc3486/fast_test.html)
+# find all style check scripts under the directory:
+cd ./utils/check-style
 
-#### Status Page Files
+# Check duplicate includes
+./check-duplicate-includes.sh
+
+# Check c++ formatting
+./check-style
+
+# Check python formatting with black
+./check-black
+
+# Check python type hinting with mypy
+./check-mypy
+
+# Check python with flake8
+./check-flake8
+
+# Check code with codespell
+./check-typos
+
+# Check docs spelling
+./check-doc-aspell
+
+# Check whitespaces
+./check-whitespaces
+
+# Check github actions workflows
+./check-workflows
+
+# Check submodules
+./check-submodules
+
+# Check shell scripts with shellcheck
+./shellcheck-run.sh
+```
+
+## Fast Test {#fast-test}
+
+Normally this is the first check that is run for a PR.
+It builds ClickHouse and runs most of [stateless functional tests](tests.md#functional-tests), omitting some.
+If it fails, further checks are not started until it is fixed.
+Look at the report to see which tests fail, then reproduce the failure locally as described [here](tests.md#functional-test-locally).
+
+#### Running Fast Test locally: {#running-fast-test-locally}
+
+```sh
+mkdir -p /tmp/test_output
+mkdir -p /tmp/fasttest-workspace
+cd ClickHouse
+# this docker command performs minimal ClickHouse build and run FastTests against it
+docker run --rm --cap-add=SYS_PTRACE -u $(id -u ${USER}):$(id -g ${USER})  --network=host -e FASTTEST_WORKSPACE=/fasttest-workspace -e FASTTEST_OUTPUT=/test_output -e FASTTEST_SOURCE=/ClickHouse --cap-add=SYS_PTRACE -e stage=clone_submodules --volume=/tmp/fasttest-workspace:/fasttest-workspace --volume=.:/ClickHouse --volume=/tmp/test_output:/test_output clickhouse/fasttest
+```
+
+#### Status Page Files {#status-page-files}
+
 - `runlog.out.log` is the general log that includes all other logs.
 - `test_log.txt`
 - `submodule_log.txt` contains the messages about cloning and checkouting needed submodules.
@@ -100,7 +134,7 @@ described [here](tests.md#functional-test-locally).
 - `build_log.txt`
 - `cmake_log.txt` contains messages about the C/C++ and Linux flags check.
 
-#### Status Page Columns
+#### Status Page Columns {#status-page-columns}
 
 - *Test name* contains the name of the test (without the path e.g. all types of tests will be stripped to the name).
 - *Test status* -- one of _Skipped_, _Success_, or _Fail_.
@@ -109,16 +143,17 @@ described [here](tests.md#functional-test-locally).
 
 ## Build Check {#build-check}
 
-Builds ClickHouse in various configurations for use in further steps. You have to fix the builds that fail. Build logs often has enough information to fix the error, but you might have to reproduce the failure locally. The `cmake` options can be found in the build log, grepping for `cmake`. Use these options and follow the [general build process](../development/build.md).
+Builds ClickHouse in various configurations for use in further steps.
+You have to fix the builds that fail.
+Build logs often have enough information to fix the error, but you might have to reproduce the failure locally.
+The `cmake` options can be found in the build log, grep for `cmake`.
+Use these options and follow the [general build process](../development/build.md).
 
-### Report Details
+### Report Details {#report-details}
 
-[Status page example](https://clickhouse-builds.s3.yandex.net/12550/67d716b5cc3987801996c31a67b31bf141bc3486/clickhouse_build_check/report.html).
-
-- **Compiler**: `gcc-9` or `clang-10` (or `clang-10-xx` for other architectures e.g. `clang-10-freebsd`).
+- **Compiler**: `clang-19`, optionally with the name of a target platform
 - **Build type**: `Debug` or `RelWithDebInfo` (cmake).
 - **Sanitizer**: `none` (without sanitizers), `address` (ASan), `memory` (MSan), `undefined` (UBSan), or `thread` (TSan).
-- **Split** `splitted` is a [split build](../development/build.md#split-build)
 - **Status**: `success` or `fail`
 - **Build log**: link to the building and files copying log, useful when build failed.
 - **Build time**.
@@ -130,62 +165,58 @@ Builds ClickHouse in various configurations for use in further steps. You have t
   - `clickhouse`: Main built binary.
   - `clickhouse-odbc-bridge`
   - `unit_tests_dbms`: GoogleTest binary with ClickHouse unit tests.
-  - `shared_build.tgz`: build with shared libraries.
-  - `performance.tgz`: Special package for performance tests.
+  - `performance.tar.zst`: Special package for performance tests.
 
 
-## Special Build Check
+## Special Build Check {#special-build-check}
 Performs static analysis and code style checks using `clang-tidy`. The report is similar to the [build check](#build-check). Fix the errors found in the build log.
 
+#### Running clang-tidy locally: {#running-clang-tidy-locally}
 
-## Functional Stateless Tests
-Runs [stateless functional tests](tests.md#functional-tests) for ClickHouse
-binaries built in various configurations -- release, debug, with sanitizers,
-etc. Look at the report to see which tests fail, then reproduce the failure
-locally as described [here](tests.md#functional-test-locally). Note that you
-have to use the correct build configuration to reproduce -- a test might fail
-under AddressSanitizer but pass in Debug. Download the binary from [CI build
-checks page](../development/build.md#you-dont-have-to-build-clickhouse), or build it locally.
+There is a convenience `packager` script that runs the clang-tidy build in docker
+```sh
+mkdir build_tidy
+./docker/packager/packager --output-dir=./build_tidy --package-type=binary --compiler=clang-19 --debug-build --clang-tidy
+```
 
+## Functional Stateless Tests {#functional-stateless-tests}
+Runs [stateless functional tests](tests.md#functional-tests) for ClickHouse binaries built in various configurations -- release, debug, with sanitizers, etc.
+Look at the report to see which tests fail, then reproduce the failure locally as described [here](tests.md#functional-test-locally).
+Note that you have to use the correct build configuration to reproduce -- a test might fail under AddressSanitizer but pass in Debug.
+Download the binary from [CI build checks page](../development/build.md#you-dont-have-to-build-clickhouse), or build it locally.
 
-## Functional Stateful Tests
-Runs [stateful functional tests](tests.md#functional-tests). Treat them in the same way as the functional stateless tests. The difference is that they require `hits` and `visits` tables from the [clickstream dataset](../getting-started/example-datasets/metrica.md) to run.
+## Functional Stateful Tests {#functional-stateful-tests}
 
+Runs [stateful functional tests](tests.md#functional-tests).
+Treat them in the same way as the functional stateless tests.
+The difference is that they require `hits` and `visits` tables from the [clickstream dataset](../getting-started/example-datasets/metrica.md) to run.
 
-## Integration Tests
+## Integration Tests {#integration-tests}
 Runs [integration tests](tests.md#integration-tests).
 
+## Bugfix validate check {#bugfix-validate-check}
 
-## Testflows Check
-Runs some tests using Testflows test system. See [here](https://github.com/ClickHouse/ClickHouse/tree/master/tests/testflows#running-tests-locally) how to run them locally.
+Checks that either a new test (functional or integration) or there some changed tests that fail with the binary built on master branch.
+This check is triggered when pull request has "pr-bugfix" label.
 
-
-## Stress Test
-Runs stateless functional tests concurrently from several clients to detect
-concurrency-related errors. If it fails:
+## Stress Test {#stress-test}
+Runs stateless functional tests concurrently from several clients to detect concurrency-related errors. If it fails:
 
     * Fix all other test failures first;
     * Look at the report to find the server logs and check them for possible causes
       of error.
 
+## Compatibility Check {#compatibility-check}
 
-## Split Build Smoke Test
+Checks that `clickhouse` binary runs on distributions with old libc versions.
+If it fails, ask a maintainer for help.
 
-Checks that the server build in [split build](../development/developer-instruction.md#split-build)
-configuration can start and run simple queries.  If it fails:
-
-    * Fix other test errors first;
-    * Build the server in [split build](../development/developer-instruction.md#split-build) configuration
-      locally and check whether it can start and run `select 1`.
-
-
-## Compatibility Check
-Checks that `clickhouse` binary runs on distributions with old libc versions. If it fails, ask a maintainer for help.
+## AST Fuzzer {#ast-fuzzer}
+Runs randomly generated queries to catch program errors.
+If it fails, ask a maintainer for help.
 
 
-## AST Fuzzer
-Runs randomly generated queries to catch program errors. If it fails, ask a maintainer for help.
-
-
-## Performance Tests
-Measure changes in query performance. This is the longest check that takes just below 6 hours to run. The performance test report is described in detail [here](https://github.com/ClickHouse/ClickHouse/tree/master/docker/test/performance-comparison#how-to-read-the-report).
+## Performance Tests {#performance-tests}
+Measure changes in query performance.
+This is the longest check that takes just below 6 hours to run.
+The performance test report is described in detail [here](https://github.com/ClickHouse/ClickHouse/tree/master/docker/test/performance-comparison#how-to-read-the-report).

@@ -37,6 +37,19 @@ GRANT [ON CLUSTER cluster_name] role [,...] TO {user | another_role | CURRENT_US
 `WITH ADMIN OPTION` присваивает привилегию [ADMIN OPTION](#admin-option-privilege) пользователю или роли.
 `WITH REPLACE OPTION` заменяет все старые роли новыми ролями для пользователя `user` или `role`, если не указано, добавляет новые новые роли.
 
+## Синтаксис присвоения текущих привилегий {#grant-current-grants-syntax}
+
+```sql
+GRANT CURRENT GRANTS{(privilege[(column_name [,...])] [,...] ON {db.table|db.*|*.*|table|*}) | ON {db.table|db.*|*.*|table|*}} TO {user | role | CURRENT_USER} [,...] [WITH GRANT OPTION] [WITH REPLACE OPTION]
+```
+
+- `privilege` — Тип привилегии
+- `role` — Роль пользователя ClickHouse.
+- `user` — Пользователь ClickHouse.
+
+Использование выражения `CURRENT GRANTS` позволяет присвоить все указанные и доступные для присвоения привилегии.
+Если список привелегий не задан, то указанный пользователь или роль получат все доступные привилегии для `CURRENT_USER`.
+
 ## Использование {#grant-usage}
 
 Для использования `GRANT` пользователь должен иметь привилегию `GRANT OPTION`. Пользователь может выдавать привилегии только внутри области действий назначенных ему самому привилегий.
@@ -107,7 +120,8 @@ GRANT SELECT(x,y) ON db.table TO john WITH GRANT OPTION
 - [CREATE](#grant-create)
     - `CREATE DATABASE`
     - `CREATE TABLE`
-        - `CREATE TEMPORARY TABLE`
+        - `CREATE ARBITRARY TEMPORARY TABLE`
+            -   `CREATE TEMPORARY TABLE`
     - `CREATE VIEW`
     - `CREATE DICTIONARY`
     - `CREATE FUNCTION`
@@ -178,14 +192,23 @@ GRANT SELECT(x,y) ON db.table TO john WITH GRANT OPTION
     - `addressToSymbol`
     - `demangle`
 - [SOURCES](#grant-sources)
+    - `AZURE`
     - `FILE`
-    - `URL`
-    - `REMOTE`
-    - `MYSQL`
-    - `ODBC`
-    - `JDBC`
     - `HDFS`
+    - `HIVE`
+    - `JDBC`
+    - `KAFKA`
+    - `MONGO`
+    - `MYSQL`
+    - `NATS`
+    - `ODBC`
+    - `POSTGRES`
+    - `RABBITMQ`
+    - `REDIS`
+    - `REMOTE`
     - `S3`
+    - `SQLITE`
+    - `URL`
 - [dictGet](#grant-dictget)
 
 Примеры того, как трактуется данная иерархия:
@@ -314,7 +337,8 @@ GRANT INSERT(x,y) ON db.table TO john
 - `CREATE`. Уровень: `GROUP`
     - `CREATE DATABASE`. Уровень: `DATABASE`
     - `CREATE TABLE`. Уровень: `TABLE`
-        - `CREATE TEMPORARY TABLE`. Уровень: `GLOBAL`
+        - `CREATE ARBITRARY TEMPORARY TABLE`. Уровень: `GLOBAL`
+            - `CREATE TEMPORARY TABLE`. Уровень: `GLOBAL`
     - `CREATE VIEW`. Уровень: `VIEW`
     - `CREATE DICTIONARY`. Уровень: `DICTIONARY`
 
@@ -446,14 +470,23 @@ GRANT INSERT(x,y) ON db.table TO john
 Разрешает использовать внешние источники данных. Применяется к [движкам таблиц](../../engines/table-engines/index.md) и [табличным функциям](../table-functions/index.md#table-functions).
 
 - `SOURCES`. Уровень: `GROUP`
+    - `AZURE`. Уровень: `GLOBAL`
     - `FILE`. Уровень: `GLOBAL`
-    - `URL`. Уровень: `GLOBAL`
-    - `REMOTE`. Уровень: `GLOBAL`
-    - `YSQL`. Уровень: `GLOBAL`
-    - `ODBC`. Уровень: `GLOBAL`
-    - `JDBC`. Уровень: `GLOBAL`
     - `HDFS`. Уровень: `GLOBAL`
+    - `HIVE`. Уровень: `GLOBAL`
+    - `JDBC`. Уровень: `GLOBAL`
+    - `KAFKA`. Уровень: `GLOBAL`
+    - `MONGO`. Уровень: `GLOBAL`
+    - `MYSQL`. Уровень: `GLOBAL`
+    - `NATS`. Уровень: `GLOBAL`
+    - `ODBC`. Уровень: `GLOBAL`
+    - `POSTGRES`. Уровень: `GLOBAL`
+    - `RABBITMQ`. Уровень: `GLOBAL`
+    - `REDIS`. Уровень: `GLOBAL`
+    - `REMOTE`. Уровень: `GLOBAL`
     - `S3`. Уровень: `GLOBAL`
+    - `SQLITE`. Уровень: `GLOBAL`
+    - `URL`. Уровень: `GLOBAL`
 
 Привилегия `SOURCES` разрешает использование всех источников. Также вы можете присвоить привилегию для каждого источника отдельно. Для использования источников необходимы дополнительные привилегии.
 

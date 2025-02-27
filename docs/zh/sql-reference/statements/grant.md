@@ -55,7 +55,7 @@ GRANT SELECT(x,y) ON db.table TO john WITH GRANT OPTION
 
 同样 `john` 有权执行 `GRANT OPTION`，因此他能给其它账号进行和自己账号权限范围相同的授权。
 
-可以使用`*` 号代替表或库名进行授权操作。例如， `GRANT SELECT ONdb.* TO john` 操作运行 `john`对 `db`库的所有表执行 `SELECT`查询。同样，你可以忽略库名。在这种情形下，权限将指向当前的数据库。例如， `GRANT SELECT ON* to john` 对当前数据库的所有表指定授权， `GARNT SELECT ON mytable to john`对当前数据库的 `mytable`表进行授权。
+可以使用`*` 号代替表或库名进行授权操作。例如， `GRANT SELECT ONdb.* TO john` 操作运行 `john`对 `db`库的所有表执行 `SELECT`查询。同样，你可以忽略库名。在这种情形下，权限将指向当前的数据库。例如， `GRANT SELECT ON* to john` 对当前数据库的所有表指定授权， `GRANT SELECT ON mytable to john`对当前数据库的 `mytable`表进行授权。
 
 访问 `systen`数据库总是被允许的（因为这个数据库用来处理sql操作）
 可以一次给多个账号进行多种授权操作。 `GRANT SELECT,INSERT ON *.* TO john,robin` 允许 `john`和`robin` 账号对任意数据库的任意表执行 `INSERT`和 `SELECT`操作。
@@ -170,14 +170,23 @@ GRANT SELECT(x,y) ON db.table TO john WITH GRANT OPTION
     -   `addressToSymbol`
     -   `demangle`
 -   [SOURCES](#grant-sources)
+    -   `AZURE`
     -   `FILE`
-    -   `URL`
-    -   `REMOTE`
-    -   `YSQL`
-    -   `ODBC`
-    -   `JDBC`
     -   `HDFS`
+    -   `HIVE`
+    -   `JDBC`
+    -   `KAFKA`
+    -   `MONGO`
+    -   `MYSQL`
+    -   `NATS`
+    -   `ODBC`
+    -   `POSTGRES`
+    -   `RABBITMQ`
+    -   `REDIS`
+    -   `REMOTE`
     -   `S3`
+    -   `SQLITE`
+    -   `URL`
 -   [dictGet](#grant-dictget)
 
 如何对待该层级的示例：
@@ -280,9 +289,6 @@ GRANT INSERT(x,y) ON db.table TO john
         -   `ALTER MOVE PARTITION`. 级别: `TABLE`. 别名: `ALTER MOVE PART`, `MOVE PARTITION`, `MOVE PART`
         -   `ALTER FETCH PARTITION`. 级别: `TABLE`. 别名: `FETCH PARTITION`
         -   `ALTER FREEZE PARTITION`. 级别: `TABLE`. 别名: `FREEZE PARTITION`
-    -   `ALTER VIEW` 级别: `GROUP`
-        -   `ALTER VIEW REFRESH`. 级别: `VIEW`. 别名: `ALTER LIVE VIEW REFRESH`, `REFRESH VIEW`
-        -   `ALTER VIEW MODIFY QUERY`. 级别: `VIEW`. 别名: `ALTER TABLE MODIFY QUERY`
 
 如何对待该层级的示例：
 -   `ALTER` 权限包含所有其它 `ALTER *` 的权限
@@ -431,14 +437,23 @@ GRANT INSERT(x,y) ON db.table TO john
 允许在 [table engines](../../engines/table-engines/index.md) 和 [table functions](../../sql-reference/table-functions/index.md#table-functions)中使用外部数据源。
 
 -   `SOURCES`. 级别: `GROUP`
+    -   `AZURE`. 级别: `GLOBAL`
     -   `FILE`. 级别: `GLOBAL`
-    -   `URL`. 级别: `GLOBAL`
-    -   `REMOTE`. 级别: `GLOBAL`
-    -   `YSQL`. 级别: `GLOBAL`
-    -   `ODBC`. 级别: `GLOBAL`
-    -   `JDBC`. 级别: `GLOBAL`
     -   `HDFS`. 级别: `GLOBAL`
+    -   `HIVE`. 级别: `GLOBAL`
+    -   `JDBC`. 级别: `GLOBAL`
+    -   `KAFKA`. 级别: `GLOBAL`
+    -   `MONGO`. 级别: `GLOBAL`
+    -   `MYSQL`. 级别: `GLOBAL`
+    -   `NATS`. 级别: `GLOBAL`
+    -   `ODBC`. 级别: `GLOBAL`
+    -   `POSTGRES`. 级别: `GLOBAL`
+    -   `RABBITMQ`. 级别: `GLOBAL`
+    -   `REDIS`. 级别: `GLOBAL`
+    -   `REMOTE`. 级别: `GLOBAL`
     -   `S3`. 级别: `GLOBAL`
+    -   `SQLITE`. 级别: `GLOBAL`
+    -   `URL`. 级别: `GLOBAL`
 
 `SOURCES` 权限允许使用所有数据源。当然也可以单独对每个数据源进行授权。要使用数据源时，还需要额外的权限。
 
@@ -471,5 +486,3 @@ GRANT INSERT(x,y) ON db.table TO john
 ### ADMIN OPTION {#admin-option-privilege}
 
 `ADMIN OPTION` 权限允许用户将他们的角色分配给其它用户
-
-[原始文档](https://clickhouse.com/docs/en/query_language/grant/) <!--hide-->

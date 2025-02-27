@@ -1,10 +1,17 @@
 ---
-slug: /en/sql-reference/table-functions/jdbc
-sidebar_position: 43
+slug: /sql-reference/table-functions/jdbc
+sidebar_position: 100
 sidebar_label: jdbc
+title: "jdbc"
+description: "Returns a table that is connected via JDBC driver."
 ---
 
-# jdbc
+# jdbc Table Function
+
+:::note
+clickhouse-jdbc-bridge contains experimental codes and is no longer supported. It may contain reliability issues and security vulnerabilities. Use it at your own risk. 
+ClickHouse recommend using built-in table functions in ClickHouse which provide a better alternative for ad-hoc querying scenarios (Postgres, MySQL, MongoDB, etc).
+:::
 
 `jdbc(datasource, schema, table)` - returns table that is connected via JDBC driver.
 
@@ -35,5 +42,3 @@ SELECT a.datasource AS server1, b.datasource AS server2, b.name AS db
 FROM jdbc('mysql-dev?datasource_column', 'show databases') a
 INNER JOIN jdbc('self?datasource_column', 'show databases') b ON a.Database = b.name
 ```
-
-[Original article](https://clickhouse.com/docs/en/query_language/table_functions/jdbc/) <!--hide-->

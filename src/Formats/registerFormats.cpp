@@ -19,6 +19,7 @@ void registerFileSegmentationEngineJSONCompactEachRow(FormatFactory & factory);
 void registerFileSegmentationEngineHiveText(FormatFactory & factory);
 #endif
 void registerFileSegmentationEngineLineAsString(FormatFactory & factory);
+void registerFileSegmentationEngineBSONEachRow(FormatFactory & factory);
 
 /// Formats for both input/output.
 
@@ -49,6 +50,8 @@ void registerInputFormatJSONColumns(FormatFactory & factory);
 void registerOutputFormatJSONColumns(FormatFactory & factory);
 void registerInputFormatJSONCompactColumns(FormatFactory & factory);
 void registerOutputFormatJSONCompactColumns(FormatFactory & factory);
+void registerInputFormatBSONEachRow(FormatFactory & factory);
+void registerOutputFormatBSONEachRow(FormatFactory & factory);
 void registerInputFormatJSONColumnsWithMetadata(FormatFactory & factory);
 void registerOutputFormatJSONColumnsWithMetadata(FormatFactory & factory);
 void registerInputFormatProtobuf(FormatFactory & factory);
@@ -73,14 +76,16 @@ void registerInputFormatCustomSeparated(FormatFactory & factory);
 void registerOutputFormatCustomSeparated(FormatFactory & factory);
 void registerInputFormatCapnProto(FormatFactory & factory);
 void registerOutputFormatCapnProto(FormatFactory & factory);
+void registerInputFormatNpy(FormatFactory & factory);
+void registerOutputFormatNpy(FormatFactory & factory);
+void registerInputFormatForm(FormatFactory & factory);
 
 /// Output only (presentational) formats.
 
 void registerOutputFormatPretty(FormatFactory & factory);
-void registerOutputFormatPrettyCompact(FormatFactory & factory);
-void registerOutputFormatPrettySpace(FormatFactory & factory);
 void registerOutputFormatVertical(FormatFactory & factory);
 void registerOutputFormatJSONEachRowWithProgress(FormatFactory & factory);
+void registerOutputFormatJSONCompactEachRowWithProgress(FormatFactory & factory);
 void registerOutputFormatXML(FormatFactory & factory);
 void registerOutputFormatODBCDriver2(FormatFactory & factory);
 void registerOutputFormatNull(FormatFactory & factory);
@@ -97,6 +102,9 @@ void registerInputFormatJSONAsString(FormatFactory & factory);
 void registerInputFormatJSONAsObject(FormatFactory & factory);
 void registerInputFormatLineAsString(FormatFactory & factory);
 void registerInputFormatMySQLDump(FormatFactory & factory);
+void registerInputFormatParquetMetadata(FormatFactory & factory);
+void registerInputFormatDWARF(FormatFactory & factory);
+void registerInputFormatOne(FormatFactory & factory);
 
 #if USE_HIVE
 void registerInputFormatHiveText(FormatFactory & factory);
@@ -136,7 +144,12 @@ void registerTSKVSchemaReader(FormatFactory & factory);
 void registerValuesSchemaReader(FormatFactory & factory);
 void registerTemplateSchemaReader(FormatFactory & factory);
 void registerMySQLSchemaReader(FormatFactory & factory);
-
+void registerBSONEachRowSchemaReader(FormatFactory & factory);
+void registerParquetMetadataSchemaReader(FormatFactory & factory);
+void registerDWARFSchemaReader(FormatFactory & factory);
+void registerOneSchemaReader(FormatFactory & factory);
+void registerNpySchemaReader(FormatFactory & factory);
+void registerFormSchemaReader(FormatFactory & factory);
 
 void registerFileExtensions(FormatFactory & factory);
 
@@ -155,6 +168,7 @@ void registerFormats()
     registerFileSegmentationEngineHiveText(factory);
 #endif
     registerFileSegmentationEngineLineAsString(factory);
+    registerFileSegmentationEngineBSONEachRow(factory);
 
 
     registerInputFormatNative(factory);
@@ -184,6 +198,8 @@ void registerFormats()
     registerOutputFormatJSONColumns(factory);
     registerInputFormatJSONCompactColumns(factory);
     registerOutputFormatJSONCompactColumns(factory);
+    registerInputFormatBSONEachRow(factory);
+    registerOutputFormatBSONEachRow(factory);
     registerInputFormatJSONColumnsWithMetadata(factory);
     registerOutputFormatJSONColumnsWithMetadata(factory);
     registerInputFormatProtobuf(factory);
@@ -198,6 +214,7 @@ void registerFormats()
     registerOutputFormatRawBLOB(factory);
     registerInputFormatCustomSeparated(factory);
     registerOutputFormatCustomSeparated(factory);
+    registerInputFormatForm(factory);
 
     registerInputFormatORC(factory);
     registerOutputFormatORC(factory);
@@ -207,12 +224,13 @@ void registerFormats()
     registerOutputFormatAvro(factory);
     registerInputFormatArrow(factory);
     registerOutputFormatArrow(factory);
+    registerInputFormatNpy(factory);
+    registerOutputFormatNpy(factory);
 
     registerOutputFormatPretty(factory);
-    registerOutputFormatPrettyCompact(factory);
-    registerOutputFormatPrettySpace(factory);
     registerOutputFormatVertical(factory);
     registerOutputFormatJSONEachRowWithProgress(factory);
+    registerOutputFormatJSONCompactEachRowWithProgress(factory);
     registerOutputFormatXML(factory);
     registerOutputFormatODBCDriver2(factory);
     registerOutputFormatNull(factory);
@@ -233,6 +251,10 @@ void registerFormats()
 
     registerInputFormatCapnProto(factory);
     registerInputFormatMySQLDump(factory);
+
+    registerInputFormatParquetMetadata(factory);
+    registerInputFormatDWARF(factory);
+    registerInputFormatOne(factory);
 
     registerNonTrivialPrefixAndSuffixCheckerJSONEachRow(factory);
     registerNonTrivialPrefixAndSuffixCheckerJSONAsString(factory);
@@ -267,7 +289,12 @@ void registerFormats()
     registerValuesSchemaReader(factory);
     registerTemplateSchemaReader(factory);
     registerMySQLSchemaReader(factory);
+    registerBSONEachRowSchemaReader(factory);
+    registerParquetMetadataSchemaReader(factory);
+    registerDWARFSchemaReader(factory);
+    registerOneSchemaReader(factory);
+    registerNpySchemaReader(factory);
+    registerFormSchemaReader(factory);
 }
 
 }
-

@@ -1,13 +1,15 @@
 ---
-slug: /en/operations/system-tables/contributors
+description: "System table containing information about contributors."
+slug: /operations/system-tables/contributors
+title: "contributors"
+keywords: ["system table", "contributors"]
 ---
-# contributors
 
 Contains information about contributors. The order is random at query execution time.
 
 Columns:
 
--   `name` (String) — Contributor (author) name from git log.
+- `name` (String) — Contributor (author) name from git log.
 
 **Example**
 
@@ -41,4 +43,3 @@ SELECT * FROM system.contributors WHERE name = 'Olga Khvostikova'
 │ Olga Khvostikova │
 └──────────────────┘
 ```
-[Original article](https://clickhouse.com/docs/en/operations/system-tables/contributors) <!--hide-->

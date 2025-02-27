@@ -5,18 +5,14 @@
 #include <Core/NamesAndTypes.h>
 #include <Core/Field.h>
 
-#include <Analyzer/Identifier.h>
 #include <Analyzer/IQueryTreeNode.h>
 #include <Analyzer/ListNode.h>
 #include <Analyzer/TableExpressionModifiers.h>
 
+#include <Interpreters/Context_fwd.h>
+
 namespace DB
 {
-
-namespace ErrorCodes
-{
-    extern const int UNSUPPORTED_METHOD;
-}
 
 /** Query node represents query in query tree.
   *
@@ -66,7 +62,46 @@ using QueryNodePtr = std::shared_ptr<QueryNode>;
 class QueryNode final : public IQueryTreeNode
 {
 public:
-    explicit QueryNode();
+    /// Construct query node with context and changed settings
+    explicit QueryNode(ContextMutablePtr context_, SettingsChanges settings_changes_);
+
+    /// Construct query node with context
+    explicit QueryNode(ContextMutablePtr context_);
+
+    /// Get context
+    ContextPtr getContext() const
+    {
+        return context;
+    }
+
+    /// Get mutable context
+    const ContextMutablePtr & getMutableContext() const
+    {
+        return context;
+    }
+
+    /// Get mutable context
+    ContextMutablePtr & getMutableContext()
+    {
+        return context;
+    }
+
+    /// Returns true if query node has settings changes, false otherwise
+    bool hasSettingsChanges() const
+    {
+        return !settings_changes.empty();
+    }
+
+    /// Get query node settings changes
+    const SettingsChanges & getSettingsChanges() const
+    {
+        return settings_changes;
+    }
+
+    void clearSettingsChanges()
+    {
+        settings_changes.clear();
+    }
 
     /// Returns true if query node is subquery, false otherwise
     bool isSubquery() const
@@ -102,6 +137,18 @@ public:
     void setCTEName(std::string cte_name_value)
     {
         cte_name = std::move(cte_name_value);
+    }
+
+    /// Returns true if query node has RECURSIVE WITH, false otherwise
+    bool isRecursiveWith() const
+    {
+        return is_recursive_with;
+    }
+
+    /// Set query node RECURSIVE WITH value
+    void setIsRecursiveWith(bool is_recursive_with_value)
+    {
+        is_recursive_with = is_recursive_with_value;
     }
 
     /// Returns true if query node has DISTINCT, false otherwise
@@ -174,6 +221,30 @@ public:
     void setIsGroupByWithGroupingSets(bool is_group_by_with_grouping_sets_value)
     {
         is_group_by_with_grouping_sets = is_group_by_with_grouping_sets_value;
+    }
+
+    /// Returns true, if query node has GROUP BY ALL modifier, false otherwise
+    bool isGroupByAll() const
+    {
+        return is_group_by_all;
+    }
+
+    /// Set query node GROUP BY ALL modifier value
+    void setIsGroupByAll(bool is_group_by_all_value)
+    {
+        is_group_by_all = is_group_by_all_value;
+    }
+
+    /// Returns true, if query node has ORDER BY ALL modifier, false otherwise
+    bool isOrderByAll() const
+    {
+        return is_order_by_all;
+    }
+
+    /// Set query node ORDER BY ALL modifier value
+    void setIsOrderByAll(bool is_order_by_all_value)
+    {
+        is_order_by_all = is_order_by_all_value;
     }
 
     /// Returns true if query node WITH section is not empty, false otherwise
@@ -356,6 +427,24 @@ public:
         return children[window_child_index];
     }
 
+    /// Returns true if query node QUALIFY section is not empty, false otherwise
+    bool hasQualify() const
+    {
+        return getQualify() != nullptr;
+    }
+
+    /// Get QUALIFY section node
+    const QueryTreeNodePtr & getQualify() const
+    {
+        return children[qualify_child_index];
+    }
+
+    /// Get QUALIFY section node
+    QueryTreeNodePtr & getQualify()
+    {
+        return children[qualify_child_index];
+    }
+
     /// Returns true if query node ORDER BY section is not empty, false otherwise
     bool hasOrderBy() const
     {
@@ -506,84 +595,68 @@ public:
         return children[offset_child_index];
     }
 
-    /// Returns true if query node has settings changes specified, false otherwise
-    bool hasSettingsChanges() const
-    {
-        return !settings_changes.empty();
-    }
-
-    /// Get query node settings changes
-    const SettingsChanges & getSettingsChanges() const
-    {
-        return settings_changes;
-    }
-
-    /// Set query node settings changes value
-    void setSettingsChanges(SettingsChanges settings_changes_value)
-    {
-        settings_changes = std::move(settings_changes_value);
-    }
-
     /// Get query node projection columns
     const NamesAndTypes & getProjectionColumns() const
     {
         return projection_columns;
     }
 
-    /// Resolve query node projection columns
-    void resolveProjectionColumns(NamesAndTypes projection_columns_value)
+    /// Returns true if query node is resolved, false otherwise
+    bool isResolved() const
     {
-        projection_columns = std::move(projection_columns_value);
+        return !projection_columns.empty();
     }
+
+    /// Resolve query node projection columns
+    void resolveProjectionColumns(NamesAndTypes projection_columns_value);
+
+    /// Clear query node projection columns
+    void clearProjectionColumns()
+    {
+        projection_columns.clear();
+    }
+
+    /// Remove unused projection columns
+    void removeUnusedProjectionColumns(const std::unordered_set<size_t> & used_projection_columns_indexes);
 
     QueryTreeNodeType getNodeType() const override
     {
         return QueryTreeNodeType::QUERY;
     }
 
-    DataTypePtr getResultType() const override
-    {
-        if (constant_value)
-            return constant_value->getType();
-
-        throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "Method getResultType is not supported for non scalar query node");
-    }
-
-    /// Perform constant folding for scalar subquery node
-    void performConstantFolding(ConstantValuePtr constant_folded_value)
-    {
-        constant_value = std::move(constant_folded_value);
-    }
-
-    ConstantValuePtr getConstantValueOrNull() const override
-    {
-        return constant_value;
-    }
-
     void dumpTreeImpl(WriteBuffer & buffer, FormatState & format_state, size_t indent) const override;
 
-protected:
-    bool isEqualImpl(const IQueryTreeNode & rhs) const override;
+    void setProjectionAliasesToOverride(Names pr_aliases)
+    {
+        projection_aliases_to_override = std::move(pr_aliases);
+    }
 
-    void updateTreeHashImpl(HashState &) const override;
+protected:
+    bool isEqualImpl(const IQueryTreeNode & rhs, CompareOptions) const override;
+
+    void updateTreeHashImpl(HashState &, CompareOptions) const override;
 
     QueryTreeNodePtr cloneImpl() const override;
 
-    ASTPtr toASTImpl() const override;
+    ASTPtr toASTImpl(const ConvertToASTOptions & options) const override;
 
 private:
     bool is_subquery = false;
     bool is_cte = false;
+    bool is_recursive_with = false;
     bool is_distinct = false;
     bool is_limit_with_ties = false;
     bool is_group_by_with_totals = false;
     bool is_group_by_with_rollup = false;
     bool is_group_by_with_cube = false;
     bool is_group_by_with_grouping_sets = false;
+    bool is_group_by_all = false;
+    bool is_order_by_all = false;
 
     std::string cte_name;
     NamesAndTypes projection_columns;
-    ConstantValuePtr constant_value;
+    Names projection_aliases_to_override;
+    ContextMutablePtr context;
     SettingsChanges settings_changes;
 
     static constexpr size_t with_child_index = 0;
@@ -594,13 +667,14 @@ private:
     static constexpr size_t group_by_child_index = 5;
     static constexpr size_t having_child_index = 6;
     static constexpr size_t window_child_index = 7;
-    static constexpr size_t order_by_child_index = 8;
-    static constexpr size_t interpolate_child_index = 9;
-    static constexpr size_t limit_by_limit_child_index = 10;
-    static constexpr size_t limit_by_offset_child_index = 11;
-    static constexpr size_t limit_by_child_index = 12;
-    static constexpr size_t limit_child_index = 13;
-    static constexpr size_t offset_child_index = 14;
+    static constexpr size_t qualify_child_index = 8;
+    static constexpr size_t order_by_child_index = 9;
+    static constexpr size_t interpolate_child_index = 10;
+    static constexpr size_t limit_by_limit_child_index = 11;
+    static constexpr size_t limit_by_offset_child_index = 12;
+    static constexpr size_t limit_by_child_index = 13;
+    static constexpr size_t limit_child_index = 14;
+    static constexpr size_t offset_child_index = 15;
     static constexpr size_t children_size = offset_child_index + 1;
 };
 

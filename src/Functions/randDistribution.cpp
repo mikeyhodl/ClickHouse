@@ -1,7 +1,8 @@
 #include <Functions/IFunction.h>
 #include <Functions/FunctionHelpers.h>
 #include <Functions/FunctionFactory.h>
-#include "Common/Exception.h"
+#include <Common/Exception.h>
+#include <Common/thread_local_rng.h>
 #include <Common/NaNUtils.h>
 #include <Columns/ColumnConst.h>
 #include <Columns/ColumnsNumber.h>
@@ -23,6 +24,7 @@ namespace ErrorCodes
     extern const int ILLEGAL_COLUMN;
     extern const int BAD_ARGUMENTS;
     extern const int LOGICAL_ERROR;
+    extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
 }
 
 namespace
@@ -91,6 +93,9 @@ struct ChiSquaredDistribution
 
     static void generate(Float64 degree_of_freedom, ColumnFloat64::Container & container)
     {
+        if (degree_of_freedom <= 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument (degrees of freedom) of function {} should be greater than zero", getName());
+
         auto distribution = std::chi_squared_distribution<>(degree_of_freedom);
         for (auto & elem : container)
             elem = distribution(thread_local_rng);
@@ -105,6 +110,9 @@ struct StudentTDistribution
 
     static void generate(Float64 degree_of_freedom, ColumnFloat64::Container & container)
     {
+        if (degree_of_freedom <= 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument (degrees of freedom) of function {} should be greater than zero", getName());
+
         auto distribution = std::student_t_distribution<>(degree_of_freedom);
         for (auto & elem : container)
             elem = distribution(thread_local_rng);
@@ -119,6 +127,9 @@ struct FisherFDistribution
 
     static void generate(Float64 d1, Float64 d2, ColumnFloat64::Container & container)
     {
+        if (d1 <= 0 || d2 <= 0)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument (degrees of freedom) of function {} should be greater than zero", getName());
+
         auto distribution = std::fisher_f_distribution<>(d1, d2);
         for (auto & elem : container)
             elem = distribution(thread_local_rng);
@@ -196,7 +207,7 @@ struct PoissonDistribution
   * Accepts only constant arguments
   * Similar to the functions rand and rand64 an additional 'tag' argument could be added to the
   * end of arguments list (this argument will be ignored) which will guarantee that functions are not sticked together
-  * during optimisations.
+  * during optimizations.
   * Example: SELECT randNormal(0, 1, 1), randNormal(0, 1, 2) FROM numbers(10)
   * This query will return two different columns
   */
@@ -210,12 +221,14 @@ private:
     {
         if (parameter_number >= arguments.size())
             throw Exception(
-                ErrorCodes::LOGICAL_ERROR, "Parameter number ({}) is greater than the size of arguments ({}). This is a bug", parameter_number, arguments.size());
+                            ErrorCodes::LOGICAL_ERROR,
+                            "Parameter number ({}) is greater than the size of arguments ({}). This is a bug",
+                            parameter_number, arguments.size());
 
         const IColumn * col = arguments[parameter_number].column.get();
 
         if (!isColumnConst(*col))
-            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Parameter number {} of function must be constant.", parameter_number, getName());
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Parameter number {} of function {} must be constant.", parameter_number, getName());
 
         auto parameter = applyVisitor(FieldVisitorConvertToNumber<ResultType>(), assert_cast<const ColumnConst &>(*col).getField());
 
@@ -243,7 +256,9 @@ public:
     {
         auto desired = Distribution::getNumberOfArguments();
         if (arguments.size() != desired && arguments.size() != desired + 1)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Wrong number of arguments for function {}. Should be {} or {}", getName(), desired, desired + 1);
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                            "Wrong number of arguments for function {}. Should be {} or {}",
+                            getName(), desired, desired + 1);
 
         for (size_t i = 0; i < Distribution::getNumberOfArguments(); ++i)
         {
@@ -294,7 +309,7 @@ public:
             }
             else
             {
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "More than two argument specified for function {}", getName());
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "More than two arguments specified for function {}", getName());
             }
 
             return res_column;
@@ -306,96 +321,96 @@ public:
 REGISTER_FUNCTION(Distribution)
 {
     factory.registerFunction<FunctionRandomDistribution<UniformDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the uniform distribution in the specified range.
 Accepts two parameters - minimum bound and maximum bound.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randUniform(0, 1) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randUniform(0, 1) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
     factory.registerFunction<FunctionRandomDistribution<NormalDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the normal distribution.
 Accepts two parameters - mean and variance.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randNormal(0, 5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randNormal(0, 5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<LogNormalDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the lognormal distribution (a distribution of a random variable whose logarithm is normally distributed).
 Accepts two parameters - mean and variance.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randLogNormal(0, 5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randLogNormal(0, 5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<ExponentialDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the exponential distribution.
-Accepts one parameter.
+Accepts one parameter - lambda value.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randExponential(0, 5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randExponential(0, 5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<ChiSquaredDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the chi-squared distribution (a distribution of a sum of the squares of k independent standard normal random variables).
 Accepts one parameter - degree of freedom.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randChiSquared(5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randChiSquared(5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
     factory.registerFunction<FunctionRandomDistribution<StudentTDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the t-distribution.
 Accepts one parameter - degree of freedom.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randStudentT(5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randStudentT(5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<FisherFDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the f-distribution.
 The F-distribution is the distribution of X = (S1 / d1) / (S2 / d2) where d1 and d2 are degrees of freedom.
 Accepts two parameters - degrees of freedom.
@@ -403,69 +418,69 @@ Accepts two parameters - degrees of freedom.
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randFisherF(5) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randFisherF(5) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<BernoulliDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the Bernoulli distribution.
-Accepts two parameters - probability of success.
+Accepts one parameter - probability of success.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randBernoulli(0.1) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randBernoulli(0.1) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<BinomialDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the binomial distribution.
 Accepts two parameters - number of experiments and probability of success in each experiment.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randBinomial(10, 0.1) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randBinomial(10, 0.1) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<NegativeBinomialDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the negative binomial distribution.
 Accepts two parameters - number of experiments and probability of success in each experiment.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randNegativeBinomial(10, 0.1) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randNegativeBinomial(10, 0.1) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 
 
     factory.registerFunction<FunctionRandomDistribution<PoissonDistribution>>(
-    {
-    R"(
+    FunctionDocumentation{
+    .description=R"(
 Returns a random number from the poisson distribution.
-Accepts two parameters - the mean number of occurrences.
+Accepts one parameter - the mean number of occurrences.
 
 Typical usage:
 [example:typical]
 )",
-    Documentation::Examples{
-        {"typical", "SELECT randPoisson(3) FROM numbers(100000);"}},
-    Documentation::Categories{"Distribution"}
+    .examples{
+        {"typical", "SELECT randPoisson(3) FROM numbers(100000);", ""}},
+    .category{"Random Numbers"}
     });
 }
 

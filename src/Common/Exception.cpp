@@ -1,24 +1,28 @@
-#include "Exception.h"
-
-#include <cstring>
-#include <cxxabi.h>
-#include <cstdlib>
-#include <Poco/String.h>
-#include <Common/logger_useful.h>
-#include <IO/WriteHelpers.h>
-#include <IO/ReadHelpers.h>
+#include <base/MemorySanitizer.h>
 #include <IO/Operators.h>
-#include <IO/ReadBufferFromString.h>
 #include <IO/ReadBufferFromFile.h>
+#include <IO/ReadBufferFromString.h>
+#include <IO/ReadHelpers.h>
+#include <IO/WriteHelpers.h>
 #include <base/demangle.h>
-#include <base/errnoToString.h>
-#include <Common/formatReadable.h>
-#include <Common/filesystemHelpers.h>
+#include <Common/AtomicLogger.h>
 #include <Common/ErrorCodes.h>
+#include <Common/Exception.h>
 #include <Common/LockMemoryExceptionInThread.h>
-#include <filesystem>
+#include <Common/Logger.h>
+#include <Common/SensitiveDataMasker.h>
+#include <Common/config_version.h>
+#include <Common/filesystemHelpers.h>
+#include <Common/formatReadable.h>
+#include <Common/logger_useful.h>
 
-#include "config_version.h"
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <cxxabi.h>
+
+#include <Poco/String.h>
 
 namespace fs = std::filesystem;
 
@@ -35,62 +39,124 @@ namespace ErrorCodes
     extern const int CANNOT_MREMAP;
 }
 
-void abortOnFailedAssertion(const String & description)
+void abortOnFailedAssertion(const String & description, void * const * trace, size_t trace_offset, size_t trace_size)
 {
-    LOG_FATAL(&Poco::Logger::root(), "Logical error: '{}'.", description);
-
-    /// This is to suppress -Wmissing-noreturn
-    volatile bool always_false = false;
-    if (always_false)
-        return;
-
+    auto & logger = Poco::Logger::root();
+    LOG_FATAL(&logger, "Logical error: '{}'.", description);
+    if (trace)
+        LOG_FATAL(&logger, "Stack trace (when copying this message, always include the lines below):\n\n{}", StackTrace::toString(trace, trace_offset, trace_size));
     abort();
 }
 
+void abortOnFailedAssertion(const String & description)
+{
+    StackTrace st;
+    abortOnFailedAssertion(description, st.getFramePointers().data(), st.getOffset(), st.getSize());
+}
+
+bool terminate_on_any_exception = false;
+static int terminate_status_code = 128 + SIGABRT;
+std::function<void(const std::string & msg, int code, bool remote, const Exception::FramePointers & trace)> Exception::callback = {};
+
 /// - Aborts the process if error code is LOGICAL_ERROR.
 /// - Increments error codes statistics.
-void handle_error_code([[maybe_unused]] const std::string & msg, int code, bool remote, const Exception::FramePointers & trace)
+static size_t handle_error_code(const std::string & msg, int code, bool remote, const Exception::FramePointers & trace)
 {
     // In debug builds and builds with sanitizers, treat LOGICAL_ERROR as an assertion failure.
     // Log the message before we fail.
-#ifdef ABORT_ON_LOGICAL_ERROR
+#ifdef DEBUG_OR_SANITIZER_BUILD
     if (code == ErrorCodes::LOGICAL_ERROR)
     {
-        abortOnFailedAssertion(msg);
+        abortOnFailedAssertion(msg, trace.data(), 0, trace.size());
     }
 #endif
 
-    ErrorCodes::increment(code, remote, msg, trace);
+    if (Exception::callback)
+        Exception::callback(msg, code, remote, trace);
+
+    return ErrorCodes::increment(code, remote, msg, trace);
 }
 
-Exception::Exception(const std::string & msg, int code, bool remote_)
-    : Poco::Exception(msg, code)
+
+Exception::MessageMasked::MessageMasked(const std::string & msg_)
+    : msg(msg_)
+{
+    if (auto masker = SensitiveDataMasker::getInstance())
+        masker->wipeSensitiveData(msg);
+}
+
+Exception::MessageMasked::MessageMasked(std::string && msg_)
+    : msg(std::move(msg_))
+{
+    if (auto masker = SensitiveDataMasker::getInstance())
+        masker->wipeSensitiveData(msg);
+}
+
+const Exception::ThreadFramePointersBase Exception::dummy_frame_pointers = {};
+
+Exception::Exception(const MessageMasked & msg_masked, int code, bool remote_)
+    : Poco::Exception(msg_masked.msg, code)
     , remote(remote_)
 {
-    handle_error_code(msg, code, remote, getStackFramePointers());
+    if (terminate_on_any_exception)
+        std::_Exit(terminate_status_code);
+    capture_thread_frame_pointers = getThreadFramePointers();
+    error_index = handle_error_code(msg_masked.msg, code, remote, getStackFramePointers());
+}
+
+Exception::Exception(MessageMasked && msg_masked, int code, bool remote_)
+    : Poco::Exception(msg_masked.msg, code)
+    , remote(remote_)
+{
+    if (terminate_on_any_exception)
+        std::_Exit(terminate_status_code);
+    capture_thread_frame_pointers = getThreadFramePointers();
+    error_index = handle_error_code(message(), code, remote, getStackFramePointers());
 }
 
 Exception::Exception(CreateFromPocoTag, const Poco::Exception & exc)
     : Poco::Exception(exc.displayText(), ErrorCodes::POCO_EXCEPTION)
 {
+    if (terminate_on_any_exception)
+        std::_Exit(terminate_status_code);
+    capture_thread_frame_pointers = getThreadFramePointers();
 #ifdef STD_EXCEPTION_HAS_STACK_TRACE
-    set_stack_trace(exc.get_stack_trace_frames(), exc.get_stack_trace_size());
+    auto * stack_trace_frames = exc.get_stack_trace_frames();
+    auto stack_trace_size = exc.get_stack_trace_size();
+    __msan_unpoison(stack_trace_frames, stack_trace_size * sizeof(stack_trace_frames[0]));
+    set_stack_trace(stack_trace_frames, stack_trace_size);
 #endif
 }
 
 Exception::Exception(CreateFromSTDTag, const std::exception & exc)
     : Poco::Exception(demangle(typeid(exc).name()) + ": " + String(exc.what()), ErrorCodes::STD_EXCEPTION)
 {
+    if (terminate_on_any_exception)
+        std::_Exit(terminate_status_code);
+    capture_thread_frame_pointers = getThreadFramePointers();
 #ifdef STD_EXCEPTION_HAS_STACK_TRACE
-    set_stack_trace(exc.get_stack_trace_frames(), exc.get_stack_trace_size());
+    auto * stack_trace_frames = exc.get_stack_trace_frames();
+    auto stack_trace_size = exc.get_stack_trace_size();
+    __msan_unpoison(stack_trace_frames, stack_trace_size * sizeof(stack_trace_frames[0]));
+    set_stack_trace(stack_trace_frames, stack_trace_size);
 #endif
+}
+
+void Exception::addMessage(const MessageMasked & msg_masked)
+{
+    extendedMessage(msg_masked.msg);
+    if (error_index != static_cast<size_t>(-1))
+        ErrorCodes::extendedMessage(code(), remote, error_index, message());
 }
 
 
 std::string getExceptionStackTraceString(const std::exception & e)
 {
 #ifdef STD_EXCEPTION_HAS_STACK_TRACE
-    return StackTrace::toString(e.get_stack_trace_frames(), 0, e.get_stack_trace_size());
+    auto * stack_trace_frames = e.get_stack_trace_frames();
+    auto stack_trace_size = e.get_stack_trace_size();
+    __msan_unpoison(stack_trace_frames, stack_trace_size * sizeof(stack_trace_frames[0]));
+    return StackTrace::toString(stack_trace_frames, 0, stack_trace_size);
 #else
     if (const auto * db_exception = dynamic_cast<const Exception *>(&e))
         return db_exception->getStackTraceString();
@@ -118,7 +184,20 @@ std::string getExceptionStackTraceString(std::exception_ptr e)
 std::string Exception::getStackTraceString() const
 {
 #ifdef STD_EXCEPTION_HAS_STACK_TRACE
-    return StackTrace::toString(get_stack_trace_frames(), 0, get_stack_trace_size());
+    auto * stack_trace_frames = get_stack_trace_frames();
+    auto stack_trace_size = get_stack_trace_size();
+    __msan_unpoison(stack_trace_frames, stack_trace_size * sizeof(stack_trace_frames[0]));
+    String thread_stack_trace;
+    std::for_each(capture_thread_frame_pointers.rbegin(), capture_thread_frame_pointers.rend(),
+        [&thread_stack_trace](StackTrace::FramePointers & frame_pointers)
+        {
+            thread_stack_trace +=
+                "\nJob's origin stack trace:\n" +
+                StackTrace::toString(frame_pointers.data(), 0, std::ranges::find(frame_pointers, nullptr) - frame_pointers.begin());
+        }
+    );
+
+    return StackTrace::toString(stack_trace_frames, 0, stack_trace_size) + thread_stack_trace;
 #else
     return trace.toString();
 #endif
@@ -134,6 +213,7 @@ Exception::FramePointers Exception::getStackFramePointers() const
         {
             frame_pointers[i] = get_stack_trace_frames()[i];
         }
+        __msan_unpoison(frame_pointers.data(), frame_pointers.size() * sizeof(frame_pointers[0]));
     }
 #else
     {
@@ -149,33 +229,74 @@ Exception::FramePointers Exception::getStackFramePointers() const
     return frame_pointers;
 }
 
+thread_local bool Exception::enable_job_stack_trace = false;
+thread_local bool Exception::can_use_thread_frame_pointers = false;
+thread_local Exception::ThreadFramePointers Exception::thread_frame_pointers;
 
-void throwFromErrno(const std::string & s, int code, int the_errno)
+Exception::ThreadFramePointers::ThreadFramePointers()
 {
-    throw ErrnoException(s + ", " + errnoToString(the_errno), code, the_errno);
+    can_use_thread_frame_pointers = true;
 }
 
-void throwFromErrnoWithPath(const std::string & s, const std::string & path, int code, int the_errno)
+Exception::ThreadFramePointers::~ThreadFramePointers()
 {
-    throw ErrnoException(s + ", " + errnoToString(the_errno), code, the_errno, path);
+    can_use_thread_frame_pointers = false;
 }
 
-static void tryLogCurrentExceptionImpl(Poco::Logger * logger, const std::string & start_of_message)
+const Exception::ThreadFramePointersBase & Exception::getThreadFramePointers()
 {
+    if (can_use_thread_frame_pointers)
+        return thread_frame_pointers.frame_pointers;
+
+    return dummy_frame_pointers;
+}
+
+void Exception::setThreadFramePointers(ThreadFramePointersBase frame_pointers)
+{
+    if (can_use_thread_frame_pointers)
+        thread_frame_pointers.frame_pointers = std::move(frame_pointers);
+}
+
+void Exception::clearThreadFramePointers()
+{
+    if (can_use_thread_frame_pointers)
+        thread_frame_pointers.frame_pointers.clear();
+}
+
+static void tryLogCurrentExceptionImpl(Poco::Logger * logger, const std::string & start_of_message, LogsLevel level)
+{
+    if (!isLoggingEnabled())
+        return;
+
     try
     {
-        if (start_of_message.empty())
-            LOG_ERROR(logger, "{}", getCurrentExceptionMessage(true));
-        else
-            LOG_ERROR(logger, "{}: {}", start_of_message, getCurrentExceptionMessage(true));
+        PreformattedMessage message = getCurrentExceptionMessageAndPattern(true);
+        if (!start_of_message.empty())
+            message.text = fmt::format("{}: {}", start_of_message, message.text);
+
+        switch (level)
+        {
+            case LogsLevel::none: break;
+            case LogsLevel::test: LOG_TEST(logger, message); break;
+            case LogsLevel::trace: LOG_TRACE(logger, message); break;
+            case LogsLevel::debug: LOG_DEBUG(logger, message); break;
+            case LogsLevel::information: LOG_INFO(logger, message); break;
+            case LogsLevel::warning: LOG_WARNING(logger, message); break;
+            case LogsLevel::error: LOG_ERROR(logger, message); break;
+            case LogsLevel::fatal: LOG_FATAL(logger, message); break;
+        }
+
     }
-    catch (...)
+    catch (...) // NOLINT(bugprone-empty-catch)
     {
     }
 }
 
-void tryLogCurrentException(const char * log_name, const std::string & start_of_message)
+void tryLogCurrentException(const char * log_name, const std::string & start_of_message, LogsLevel level)
 {
+    if (!isLoggingEnabled())
+        return;
+
     /// Under high memory pressure, new allocations throw a
     /// MEMORY_LIMIT_EXCEEDED exception.
     ///
@@ -183,11 +304,12 @@ void tryLogCurrentException(const char * log_name, const std::string & start_of_
     /// MemoryTracker until the exception will be logged.
     LockMemoryExceptionInThread lock_memory_tracker(VariableContext::Global);
 
-    /// Poco::Logger::get can allocate memory too
-    tryLogCurrentExceptionImpl(&Poco::Logger::get(log_name), start_of_message);
+    /// getLogger can allocate memory too
+    auto logger = getLogger(String{log_name});
+    tryLogCurrentExceptionImpl(logger.get(), start_of_message, level);
 }
 
-void tryLogCurrentException(Poco::Logger * logger, const std::string & start_of_message)
+void tryLogCurrentException(Poco::Logger * logger, const std::string & start_of_message, LogsLevel level)
 {
     /// Under high memory pressure, new allocations throw a
     /// MEMORY_LIMIT_EXCEEDED exception.
@@ -196,7 +318,17 @@ void tryLogCurrentException(Poco::Logger * logger, const std::string & start_of_
     /// MemoryTracker until the exception will be logged.
     LockMemoryExceptionInThread lock_memory_tracker(VariableContext::Global);
 
-    tryLogCurrentExceptionImpl(logger, start_of_message);
+    tryLogCurrentExceptionImpl(logger, start_of_message, level);
+}
+
+void tryLogCurrentException(LoggerPtr logger, const std::string & start_of_message, LogsLevel level)
+{
+    tryLogCurrentException(logger.get(), start_of_message, level);
+}
+
+void tryLogCurrentException(const AtomicLogger & logger, const std::string & start_of_message, LogsLevel level)
+{
+    tryLogCurrentException(logger.load(), start_of_message, level);
 }
 
 static void getNoSpaceLeftInfoMessage(std::filesystem::path path, String & msg)
@@ -316,7 +448,14 @@ std::string getExtraExceptionInfo(const std::exception & e)
 
 std::string getCurrentExceptionMessage(bool with_stacktrace, bool check_embedded_stacktrace /*= false*/, bool with_extra_info /*= true*/)
 {
+    return getCurrentExceptionMessageAndPattern(with_stacktrace, check_embedded_stacktrace, with_extra_info).text;
+}
+
+PreformattedMessage getCurrentExceptionMessageAndPattern(bool with_stacktrace, bool check_embedded_stacktrace /*= false*/, bool with_extra_info /*= true*/)
+{
     WriteBufferFromOwnString stream;
+    std::string_view message_format_string;
+    std::vector<std::string> message_format_string_args;
 
     try
     {
@@ -327,6 +466,8 @@ std::string getCurrentExceptionMessage(bool with_stacktrace, bool check_embedded
         stream << getExceptionMessage(e, with_stacktrace, check_embedded_stacktrace)
                << (with_extra_info ? getExtraExceptionInfo(e) : "")
                << " (version " << VERSION_STRING << VERSION_OFFICIAL << ")";
+        message_format_string = e.tryGetMessageFormatString();
+        message_format_string_args = e.getMessageFormatStringArgs();
     }
     catch (const Poco::Exception & e)
     {
@@ -338,7 +479,7 @@ std::string getCurrentExceptionMessage(bool with_stacktrace, bool check_embedded
                 << (with_extra_info ? getExtraExceptionInfo(e) : "")
                 << " (version " << VERSION_STRING << VERSION_OFFICIAL << ")";
         }
-        catch (...) {}
+        catch (...) {} // NOLINT(bugprone-empty-catch)
     }
     catch (const std::exception & e)
     {
@@ -355,7 +496,22 @@ std::string getCurrentExceptionMessage(bool with_stacktrace, bool check_embedded
                 << (with_extra_info ? getExtraExceptionInfo(e) : "")
                 << " (version " << VERSION_STRING << VERSION_OFFICIAL << ")";
         }
-        catch (...) {}
+        catch (...) {} // NOLINT(bugprone-empty-catch)
+
+#ifdef DEBUG_OR_SANITIZER_BUILD
+        try
+        {
+            throw;
+        }
+        catch (const std::logic_error &)
+        {
+            if (!with_stacktrace)
+                stream << ", Stack trace:\n\n" << getExceptionStackTraceString(e);
+
+            abortOnFailedAssertion(stream.str());
+        }
+        catch (...) {} // NOLINT(bugprone-empty-catch)
+#endif
     }
     catch (...)
     {
@@ -369,10 +525,10 @@ std::string getCurrentExceptionMessage(bool with_stacktrace, bool check_embedded
 
             stream << "Unknown exception. Code: " << ErrorCodes::UNKNOWN_EXCEPTION << ", type: " << name << " (version " << VERSION_STRING << VERSION_OFFICIAL << ")";
         }
-        catch (...) {}
+        catch (...) {} // NOLINT(bugprone-empty-catch)
     }
 
-    return stream.str();
+    return PreformattedMessage{stream.str(), message_format_string, message_format_string_args};
 }
 
 
@@ -425,14 +581,6 @@ int getExceptionErrorCode(std::exception_ptr e)
 }
 
 
-void rethrowFirstException(const Exceptions & exceptions)
-{
-    for (const auto & exception : exceptions)
-        if (exception)
-            std::rethrow_exception(exception);
-}
-
-
 void tryLogException(std::exception_ptr e, const char * log_name, const std::string & start_of_message)
 {
     try
@@ -445,7 +593,7 @@ void tryLogException(std::exception_ptr e, const char * log_name, const std::str
     }
 }
 
-void tryLogException(std::exception_ptr e, Poco::Logger * logger, const std::string & start_of_message)
+void tryLogException(std::exception_ptr e, LoggerPtr logger, const std::string & start_of_message)
 {
     try
     {
@@ -457,7 +605,17 @@ void tryLogException(std::exception_ptr e, Poco::Logger * logger, const std::str
     }
 }
 
+void tryLogException(std::exception_ptr e, const AtomicLogger & logger, const std::string & start_of_message)
+{
+    tryLogException(e, logger.load(), start_of_message);
+}
+
 std::string getExceptionMessage(const Exception & e, bool with_stacktrace, bool check_embedded_stacktrace)
+{
+    return getExceptionMessageAndPattern(e, with_stacktrace, check_embedded_stacktrace).text;
+}
+
+PreformattedMessage getExceptionMessageAndPattern(const Exception & e, bool with_stacktrace, bool check_embedded_stacktrace)
 {
     WriteBufferFromOwnString stream;
 
@@ -487,12 +645,12 @@ std::string getExceptionMessage(const Exception & e, bool with_stacktrace, bool 
         if (with_stacktrace && !has_embedded_stack_trace)
             stream << ", Stack trace (when copying this message, always include the lines below):\n\n" << e.getStackTraceString();
     }
-    catch (...) {}
+    catch (...) {} // NOLINT(bugprone-empty-catch)
 
-    return stream.str();
+    return PreformattedMessage{stream.str(), e.tryGetMessageFormatString(), e.getMessageFormatStringArgs()};
 }
 
-std::string getExceptionMessage(std::exception_ptr e, bool with_stacktrace)
+std::string getExceptionMessage(std::exception_ptr e, bool with_stacktrace, bool check_embedded_stacktrace)
 {
     try
     {
@@ -500,7 +658,7 @@ std::string getExceptionMessage(std::exception_ptr e, bool with_stacktrace)
     }
     catch (...)
     {
-        return getCurrentExceptionMessage(with_stacktrace);
+        return getCurrentExceptionMessage(with_stacktrace, check_embedded_stacktrace);
     }
 }
 
@@ -532,9 +690,9 @@ bool ExecutionStatus::tryDeserializeText(const std::string & data)
     return true;
 }
 
-ExecutionStatus ExecutionStatus::fromCurrentException(const std::string & start_of_message)
+ExecutionStatus ExecutionStatus::fromCurrentException(const std::string & start_of_message, bool with_stacktrace)
 {
-    String msg = (start_of_message.empty() ? "" : (start_of_message + ": ")) + getCurrentExceptionMessage(false, true);
+    String msg = (start_of_message.empty() ? "" : (start_of_message + ": ")) + getCurrentExceptionMessage(with_stacktrace, true);
     return ExecutionStatus(getCurrentExceptionCode(), msg);
 }
 
@@ -544,53 +702,5 @@ ExecutionStatus ExecutionStatus::fromText(const std::string & data)
     status.deserializeText(data);
     return status;
 }
-
-ParsingException::ParsingException() = default;
-ParsingException::ParsingException(const std::string & msg, int code)
-    : Exception(msg, code)
-{
-}
-ParsingException::ParsingException(int code, const std::string & message)
-    : Exception(message, code)
-{
-}
-
-/// We use additional field formatted_message_ to make this method const.
-std::string ParsingException::displayText() const
-{
-    try
-    {
-        formatted_message = message();
-        bool need_newline = false;
-        if (!file_name.empty())
-        {
-            formatted_message += fmt::format(": (in file/uri {})", file_name);
-            need_newline = true;
-        }
-
-        if (line_number != -1)
-        {
-            formatted_message += fmt::format(": (at row {})", line_number);
-            need_newline = true;
-        }
-
-        if (need_newline)
-            formatted_message += "\n";
-    }
-    catch (...) {}
-
-    if (!formatted_message.empty())
-    {
-        std::string result = name();
-        result.append(": ");
-        result.append(formatted_message);
-        return result;
-    }
-    else
-    {
-        return Exception::displayText();
-    }
-}
-
 
 }

@@ -9,15 +9,15 @@ namespace DB
 {
 
 /// Creates sets for subqueries and JOIN. See CreatingSetsTransform.
-class CreatingSetStep : public ITransformingStep, WithContext
+class CreatingSetStep : public ITransformingStep
 {
 public:
     CreatingSetStep(
-            const DataStream & input_stream_,
-            String description_,
-            SubqueryForSet subquery_for_set_,
-            SizeLimits network_transfer_limits_,
-            ContextPtr context_);
+        const Header & input_header_,
+        SetAndKeyPtr set_and_key_,
+        StoragePtr external_table_,
+        SizeLimits network_transfer_limits_,
+        ContextPtr context_);
 
     String getName() const override { return "CreatingSet"; }
 
@@ -27,17 +27,18 @@ public:
     void describeActions(FormatSettings & settings) const override;
 
 private:
-    void updateOutputStream() override;
+    void updateOutputHeader() override;
 
-    String description;
-    SubqueryForSet subquery_for_set;
+    SetAndKeyPtr set_and_key;
+    StoragePtr external_table;
     SizeLimits network_transfer_limits;
+    ContextPtr context;
 };
 
 class CreatingSetsStep : public IQueryPlanStep
 {
 public:
-    explicit CreatingSetsStep(DataStreams input_streams_);
+    explicit CreatingSetsStep(Headers input_headers_);
 
     String getName() const override { return "CreatingSets"; }
 
@@ -46,11 +47,39 @@ public:
     void describePipeline(FormatSettings & settings) const override;
 
 private:
-    Processors processors;
+    void updateOutputHeader() override { output_header = getInputHeaders().front(); }
 };
 
-void addCreatingSetsStep(QueryPlan & query_plan, PreparedSets::SubqueriesForSets subqueries_for_sets, ContextPtr context);
+/// This is a temporary step which is converted to CreatingSetStep after plan optimization.
+/// Can't be used by itself.
+class DelayedCreatingSetsStep final : public IQueryPlanStep
+{
+public:
+    DelayedCreatingSetsStep(Header input_header, PreparedSets::Subqueries subqueries_, ContextPtr context_);
+
+    String getName() const override { return "DelayedCreatingSets"; }
+
+    QueryPipelineBuilderPtr updatePipeline(QueryPipelineBuilders, const BuildQueryPipelineSettings &) override;
+
+    static std::vector<std::unique_ptr<QueryPlan>> makePlansForSets(DelayedCreatingSetsStep && step);
+
+    ContextPtr getContext() const { return context; }
+    const PreparedSets::Subqueries & getSets() const { return subqueries; }
+    PreparedSets::Subqueries detachSets() { return std::move(subqueries); }
+
+    void serialize(Serialization &) const override {}
+
+private:
+    void updateOutputHeader() override { output_header = getInputHeaders().front(); }
+
+    PreparedSets::Subqueries subqueries;
+    ContextPtr context;
+};
+
+void addCreatingSetsStep(QueryPlan & query_plan, PreparedSets::Subqueries subqueries, ContextPtr context);
 
 void addCreatingSetsStep(QueryPlan & query_plan, PreparedSetsPtr prepared_sets, ContextPtr context);
+
+QueryPipelineBuilderPtr addCreatingSetsTransform(QueryPipelineBuilderPtr pipeline, PreparedSets::Subqueries subqueries, ContextPtr context);
 
 }

@@ -1,7 +1,9 @@
 ---
-slug: /en/operations/settings/permissions-for-queries
+slug: /operations/settings/permissions-for-queries
 sidebar_position: 58
 sidebar_label: Permissions for Queries
+title: "Permissions for Queries"
+description: "Settings for query permissions."
 ---
 
 # Permissions for Queries
@@ -16,13 +18,13 @@ Queries in ClickHouse can be divided into several types:
 
 The following settings regulate user permissions by the type of query:
 
-## readonly
+## readonly {#readonly}
 Restricts permissions for read data, write data, and change settings queries.
 
 When set to 1, allows:
 
--   All types of read queries (like SELECT and equivalent queries).
--   Queries that modify only session context (like USE).
+- All types of read queries (like SELECT and equivalent queries).
+- Queries that modify only session context (like USE).
 
 When set to 2, allows the above plus:
 - SET and CREATE TEMPORARY TABLE
@@ -33,14 +35,14 @@ When set to 2, allows the above plus:
 
 Possible values:
 
--   0 — Read, Write, and Change settings queries are allowed.
--   1 — Only Read data queries are allowed.
--   2 — Read data and Change settings queries are allowed.
+- 0 — Read, Write, and Change settings queries are allowed.
+- 1 — Only Read data queries are allowed.
+- 2 — Read data and Change settings queries are allowed.
 
 Default value: 0
 
 :::note
-After setting `readonly = 1`, the user can’t change `readonly` and `allow_ddl` settings in the current session.
+After setting `readonly = 1`, the user can't change `readonly` and `allow_ddl` settings in the current session.
 
 When using the `GET` method in the [HTTP interface](../../interfaces/http.md), `readonly = 1` is set automatically. To modify data, use the `POST` method.
 
@@ -48,14 +50,14 @@ Setting `readonly = 1` prohibits the user from changing settings. There is a way
 :::
 
 
-## allow_ddl {#settings_allow_ddl}
+## allow_ddl {#allow_ddl}
 
 Allows or denies [DDL](https://en.wikipedia.org/wiki/Data_definition_language) queries.
 
 Possible values:
 
--   0 — DDL queries are not allowed.
--   1 — DDL queries are allowed.
+- 0 — DDL queries are not allowed.
+- 1 — DDL queries are allowed.
 
 Default value: 1
 

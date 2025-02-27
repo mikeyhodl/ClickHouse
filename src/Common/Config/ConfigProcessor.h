@@ -7,6 +7,8 @@
 #include <vector>
 #include <memory>
 
+#include <Common/Logger.h>
+
 #include <Poco/DOM/Document.h>
 #include <Poco/DOM/DOMParser.h>
 #include <Poco/DOM/DOMWriter.h>
@@ -16,8 +18,9 @@
 #include <Poco/DirectoryIterator.h>
 #include <Poco/ConsoleChannel.h>
 #include <Poco/Util/AbstractConfiguration.h>
-#include <Common/logger_useful.h>
 
+
+namespace Poco { class Logger; }
 
 namespace zkutil
 {
@@ -43,8 +46,6 @@ public:
         bool log_to_console = false,
         const Substitutions & substitutions = Substitutions());
 
-    ~ConfigProcessor();
-
     /// Perform config includes and substitutions and return the resulting XML-document.
     ///
     /// Suppose path is "/path/file.xml"
@@ -62,7 +63,13 @@ public:
     XMLDocumentPtr processConfig(
         bool * has_zk_includes = nullptr,
         zkutil::ZooKeeperNodeCache * zk_node_cache = nullptr,
-        const zkutil::EventPtr & zk_changed_event = nullptr);
+        const zkutil::EventPtr & zk_changed_event = nullptr,
+        bool is_config_changed = true);
+
+    XMLDocumentPtr parseConfig(const std::string & config_path);
+
+    /// These configurations will be used if there is no configuration file.
+    static void registerEmbeddedConfig(std::string name, std::string_view content);
 
 
     /// loadConfig* functions apply processConfig and create Poco::Util::XMLConfiguration.
@@ -82,18 +89,25 @@ public:
     /// If allow_zk_includes is true, expect that the configuration XML can contain from_zk nodes.
     /// If it is the case, set has_zk_includes to true and don't write config-preprocessed.xml,
     /// expecting that config would be reloaded with zookeeper later.
-    LoadedConfig loadConfig(bool allow_zk_includes = false);
+    LoadedConfig loadConfig(bool allow_zk_includes = false, bool is_config_changed = true);
 
     /// If fallback_to_preprocessed is true, then if KeeperException is thrown during config
     /// processing, load the configuration from the preprocessed file.
     LoadedConfig loadConfigWithZooKeeperIncludes(
         zkutil::ZooKeeperNodeCache & zk_node_cache,
         const zkutil::EventPtr & zk_changed_event,
-        bool fallback_to_preprocessed = false);
+        bool fallback_to_preprocessed = false,
+        bool is_config_changed = true);
 
     /// Save preprocessed config to specified directory.
     /// If preprocessed_dir is empty - calculate from loaded_config.path + /preprocessed_configs/
-    void savePreprocessedConfig(const LoadedConfig & loaded_config, std::string preprocessed_dir);
+    /// If skip_zk_encryption_keys == true, skip loading encryption keys with from_zk directive and decrypting config values,
+    /// otherwise load/decrypt all types of keys
+    void savePreprocessedConfig(LoadedConfig & loaded_config, std::string preprocessed_dir
+#if USE_SSL
+        , bool skip_zk_encryption_keys = false
+#endif
+    );
 
     /// Set path of main config.xml. It will be cut from all configs placed to preprocessed_configs/
     static void setConfigPath(const std::string & config_path);
@@ -105,6 +119,14 @@ public:
     /// Is the file named as result of config preprocessing, not as original files.
     static bool isPreprocessedFile(const std::string & config_path);
 
+#if USE_SSL
+    /// Encrypt text value
+    static std::string encryptValue(const std::string & codec_name, const std::string & value);
+
+    /// Decrypt value
+    static std::string decryptValue(const std::string & codec_name, const std::string & value);
+#endif
+
     static inline const auto SUBSTITUTION_ATTRS = {"incl", "from_zk", "from_env"};
 
 private:
@@ -113,7 +135,7 @@ private:
 
     bool throw_on_bad_incl;
 
-    Poco::Logger * log;
+    LoggerPtr log;
     Poco::AutoPtr<Poco::Channel> channel_ptr;
 
     Substitutions substitutions;
@@ -123,9 +145,28 @@ private:
 
     using NodePtr = Poco::AutoPtr<Poco::XML::Node>;
 
+#if USE_SSL
+    /// Decrypt elements in XML tree recursively starting with config_root
+    static void decryptRecursive(Poco::XML::Node * config_root);
+    /// Decrypt elements in config with specified encryption attributes and previously loaded encryption keys
+    static void decryptEncryptedElements(LoadedConfig & loaded_config);
+
+    /// Determine if there is a node starting inside config_root which has a descendant with a given attribute
+    static bool hasNodeWithAttribute(Poco::XML::Node * config_root, const std::string & attribute_name);
+    /// Determine if there is a node starting inside config_root with a given node_name which has a descendant with a given attribute
+    static bool hasNodeWithNameAndChildNodeWithAttribute(Poco::XML::Node * config_root, const std::string & node_name, const std::string & attribute_name);
+    /// Determine if there is a node in loaded_config with a given node_name which has a descendant with a given attribute
+    static bool hasNodeWithNameAndChildNodeWithAttribute(LoadedConfig & loaded_config, const std::string & node_name, const std::string & attribute_name);
+#endif
+
+    void hideRecursive(Poco::XML::Node * config_root);
+    XMLDocumentPtr hideElements(XMLDocumentPtr xml_tree);
+
     void mergeRecursive(XMLDocumentPtr config, Poco::XML::Node * config_root, const Poco::XML::Node * with_root);
 
-    void merge(XMLDocumentPtr config, XMLDocumentPtr with);
+    /// If config root node name is not 'clickhouse' and merging config's root node names doesn't match, bypasses merging and returns false.
+    /// For compatibility root node 'yandex' considered equal to 'clickhouse'.
+    bool merge(XMLDocumentPtr config, XMLDocumentPtr with);
 
     void doIncludesRecursive(
             XMLDocumentPtr config,

@@ -13,7 +13,7 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 function setup()
 {
-    $CLICKHOUSE_CLIENT -nm -q "
+    $CLICKHOUSE_CLIENT -m -q "
         drop table if exists data_01814;
         drop table if exists dist_01814;
 
@@ -24,7 +24,7 @@ function setup()
 
 function cleanup()
 {
-    $CLICKHOUSE_CLIENT -nm -q "
+    $CLICKHOUSE_CLIENT -m -q "
         drop table data_01814;
         drop table dist_01814;
     "
@@ -60,12 +60,14 @@ function test_distributed_push_down_limit_with_query_log()
         # disable hedged requests to avoid excessive log entries
         --use_hedged_requests 0
 
+        --async_query_sending_for_remote 0
+
         "$@"
     )
 
     $CLICKHOUSE_CLIENT "${settings_and_opts[@]}" -q "select * from $table group by key limit $offset, 10"
 
-    $CLICKHOUSE_CLIENT -nm -q "
+    $CLICKHOUSE_CLIENT -m -q "
         system flush logs;
         select read_rows from system.query_log
             where

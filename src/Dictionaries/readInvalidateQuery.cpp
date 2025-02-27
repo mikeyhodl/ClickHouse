@@ -1,4 +1,7 @@
-#include "readInvalidateQuery.h"
+#include <Dictionaries/readInvalidateQuery.h>
+
+#include <Columns/IColumn.h>
+#include <DataTypes/IDataType.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <IO/WriteBufferFromString.h>
@@ -35,7 +38,7 @@ std::string readInvalidateQuery(QueryPipeline pipeline)
     if (rows == 0)
         throw Exception(ErrorCodes::RECEIVED_EMPTY_DATA, "Expected single row in resultset, got 0");
     if (rows > 1)
-        throw Exception(ErrorCodes::TOO_MANY_ROWS, "Expected single row in resultset, got at least {}", std::to_string(rows));
+        throw Exception(ErrorCodes::TOO_MANY_ROWS, "Expected single row in resultset, got at least {}", rows);
 
     WriteBufferFromOwnString out;
     auto & column_type = block.getByPosition(0);
@@ -43,7 +46,7 @@ std::string readInvalidateQuery(QueryPipeline pipeline)
 
     while (executor.pull(block))
         if (block.rows() > 0)
-            throw Exception(ErrorCodes::TOO_MANY_ROWS, "Expected single row in resultset, got at least {}", std::to_string(rows + 1));
+            throw Exception(ErrorCodes::TOO_MANY_ROWS, "Expected single row in resultset, got at least {}", rows + 1);
 
     return out.str();
 }

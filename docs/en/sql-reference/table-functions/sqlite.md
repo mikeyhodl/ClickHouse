@@ -1,26 +1,29 @@
 ---
-slug: /en/sql-reference/table-functions/sqlite
-sidebar_position: 55
+slug: /sql-reference/table-functions/sqlite
+sidebar_position: 185
 sidebar_label: sqlite
 title: sqlite
+description: "Allows to perform queries on data stored in a SQLite database."
 ---
 
-Allows to perform queries on a data stored in an [SQLite](../../engines/database-engines/sqlite.md) database.
+# sqlite Table Function
 
-**Syntax** 
+Allows to perform queries on data stored in a [SQLite](../../engines/database-engines/sqlite.md) database.
 
-``` sql
-    sqlite('db_path', 'table_name')
+**Syntax**
+
+```sql
+sqlite('db_path', 'table_name')
 ```
 
-**Arguments** 
+**Arguments**
 
--   `db_path` — Path to a file with an SQLite database. [String](../../sql-reference/data-types/string.md).
--   `table_name` — Name of a table in the SQLite database. [String](../../sql-reference/data-types/string.md).
+- `db_path` — Path to a file with an SQLite database. [String](../../sql-reference/data-types/string.md).
+- `table_name` — Name of a table in the SQLite database. [String](../../sql-reference/data-types/string.md).
 
 **Returned value**
 
--   A table object with the same columns as in the original `SQLite` table.
+- A table object with the same columns as in the original `SQLite` table.
 
 **Example**
 
@@ -40,6 +43,6 @@ Result:
 └───────┴──────┘
 ```
 
-**See Also** 
+**See Also**
 
--   [SQLite](../../engines/table-engines/integrations/sqlite.md) table engine
+- [SQLite](../../engines/table-engines/integrations/sqlite.md) table engine

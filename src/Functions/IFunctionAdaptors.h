@@ -16,15 +16,8 @@ public:
 
 protected:
 
-    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const final
-    {
-        return function->executeImpl(arguments, result_type, input_rows_count);
-    }
-
-    ColumnPtr executeDryRunImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const final
-    {
-        return function->executeImplDryRun(arguments, result_type, input_rows_count);
-    }
+    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const final;
+    ColumnPtr executeDryRunImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const final;
 
     bool useDefaultImplementationForNulls() const final { return function->useDefaultImplementationForNulls(); }
     bool useDefaultImplementationForNothing() const final { return function->useDefaultImplementationForNothing(); }
@@ -51,13 +44,15 @@ public:
     const DataTypes & getArgumentTypes() const override { return arguments; }
     const DataTypePtr & getResultType() const override { return result_type; }
 
+    const FunctionPtr & getFunction() const { return function; }
+
 #if USE_EMBEDDED_COMPILER
 
-    bool isCompilable() const override { return function->isCompilable(getArgumentTypes()); }
+    bool isCompilable() const override { return function->isCompilable(getArgumentTypes(), getResultType()); }
 
-    llvm::Value * compile(llvm::IRBuilderBase & builder, Values values) const override
+    llvm::Value * compile(llvm::IRBuilderBase & builder, const ValuesWithType & compile_arguments) const override
     {
-        return function->compile(builder, getArgumentTypes(), std::move(values));
+        return function->compile(builder, compile_arguments, getResultType());
     }
 
 #endif
@@ -82,15 +77,24 @@ public:
 
     bool isDeterministicInScopeOfQuery() const override { return function->isDeterministicInScopeOfQuery(); }
 
+    bool isServerConstant() const override  { return function->isServerConstant(); }
+
     bool isShortCircuit(ShortCircuitSettings & settings, size_t number_of_arguments) const override { return function->isShortCircuit(settings, number_of_arguments); }
 
     bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & args) const override { return function->isSuitableForShortCircuitArgumentsExecution(args); }
 
     bool hasInformationAboutMonotonicity() const override { return function->hasInformationAboutMonotonicity(); }
 
+    bool hasInformationAboutPreimage() const override { return function->hasInformationAboutPreimage(); }
+
     Monotonicity getMonotonicityForRange(const IDataType & type, const Field & left, const Field & right) const override
     {
         return function->getMonotonicityForRange(type, left, right);
+    }
+
+    FieldIntervalPtr getPreimage(const IDataType & type, const Field & point) const override
+    {
+        return function->getPreimage(type, point);
     }
 private:
     std::shared_ptr<IFunction> function;
@@ -113,6 +117,9 @@ public:
     String getName() const override { return function->getName(); }
     bool isStateful() const override { return function->isStateful(); }
     bool isVariadic() const override { return function->isVariadic(); }
+    bool isServerConstant() const override { return function->isServerConstant(); }
+    bool isShortCircuit(IFunctionBase::ShortCircuitSettings & settings, size_t number_of_arguments) const override { return function->isShortCircuit(settings, number_of_arguments); }
+
     size_t getNumberOfArguments() const override { return function->getNumberOfArguments(); }
 
     ColumnNumbers getArgumentsThatAreAlwaysConstant() const override { return function->getArgumentsThatAreAlwaysConstant(); }
@@ -129,6 +136,8 @@ public:
     bool useDefaultImplementationForLowCardinalityColumns() const override { return function->useDefaultImplementationForLowCardinalityColumns(); }
     bool useDefaultImplementationForSparseColumns() const override { return function->useDefaultImplementationForSparseColumns(); }
     bool canBeExecutedOnLowCardinalityDictionary() const override { return function->canBeExecutedOnLowCardinalityDictionary(); }
+    bool useDefaultImplementationForDynamic() const override { return function->useDefaultImplementationForDynamic(); }
+    DataTypePtr getReturnTypeForDefaultImplementationForDynamic() const override { return function->getReturnTypeForDefaultImplementationForDynamic(); }
 
     FunctionBasePtr buildImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type) const override
     {

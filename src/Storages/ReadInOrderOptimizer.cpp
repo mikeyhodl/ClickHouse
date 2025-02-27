@@ -1,5 +1,6 @@
 #include <Storages/ReadInOrderOptimizer.h>
 
+#include <Core/Settings.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/TreeRewriter.h>
@@ -14,6 +15,10 @@
 
 namespace DB
 {
+namespace Setting
+{
+    extern const SettingsBool optimize_respect_aliases;
+}
 
 namespace ErrorCodes
 {
@@ -183,7 +188,7 @@ ReadInOrderOptimizer::ReadInOrderOptimizer(
     , query(query_)
 {
     if (elements_actions.size() != required_sort_description.size())
-        throw Exception("Sizes of sort description and actions are mismatched", ErrorCodes::LOGICAL_ERROR);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Sizes of sort description and actions are mismatched");
 
     /// Do not analyze joined columns.
     /// They may have aliases and come to description as is.
@@ -263,7 +268,7 @@ InputOrderInfoPtr ReadInOrderOptimizer::getInputOrder(
     /// Currently we only support alias column without any function wrapper,
     /// i.e.: `order by aliased_column` can have this optimization, but `order by function(aliased_column)` can not.
     /// This suits most cases.
-    if (context->getSettingsRef().optimize_respect_aliases && !aliased_columns.empty())
+    if (context->getSettingsRef()[Setting::optimize_respect_aliases] && !aliased_columns.empty())
     {
         SortDescription aliases_sort_description = required_sort_description;
         ManyExpressionActions aliases_actions = elements_actions;

@@ -2,8 +2,7 @@
 
 #include <Core/Block.h>
 
-#include <Interpreters/Context.h>
-#include <Interpreters/Set.h>
+#include <Interpreters/Context_fwd.h>
 #include <Interpreters/PreparedSets.h>
 #include <Interpreters/ActionsDAG.h>
 
@@ -30,6 +29,9 @@ public:
     {
         return query_context;
     }
+
+    /// Get query context settings
+    const Settings & getSettings() const;
 
     /** Get block with constants.
       * Valid only for AST tree.
@@ -72,6 +74,12 @@ public:
     /// Construct RPNBuilderTreeNode with non null ast node and tree context
     explicit RPNBuilderTreeNode(const IAST * ast_node_, RPNBuilderTreeContext & tree_context_);
 
+    /// Get AST node
+    const IAST * getASTNode() const { return ast_node; }
+
+    /// Get DAG node
+    const ActionsDAG::Node * getDAGNode() const { return dag_node; }
+
     /// Get column name
     std::string getColumnName() const;
 
@@ -86,6 +94,8 @@ public:
     /// Is node constant
     bool isConstant() const;
 
+    bool isSubqueryOrSet() const;
+
     /** Get constant as constant column.
       * Node must be constant before calling these method, otherwise logical exception is thrown.
       */
@@ -97,15 +107,10 @@ public:
     bool tryGetConstant(Field & output_value, DataTypePtr & output_type) const;
 
     /// Try get prepared set from node
-    ConstSetPtr tryGetPreparedSet() const;
+    FutureSetPtr tryGetPreparedSet() const;
 
     /// Try get prepared set from node that match data types
-    ConstSetPtr tryGetPreparedSet(const DataTypes & data_types) const;
-
-    /// Try get prepared set from node that match indexes mapping and data types
-    ConstSetPtr tryGetPreparedSet(
-        const std::vector<MergeTreeSetIndex::KeyTuplePositionMapping> & indexes_mapping,
-        const DataTypes & data_types) const;
+    FutureSetPtr tryGetPreparedSet(const DataTypes & data_types) const;
 
     /** Convert node to function node.
       * Node must be function before calling these method, otherwise exception is thrown.
@@ -193,17 +198,6 @@ public:
         traverseTree(RPNBuilderTreeNode(filter_actions_dag_node, tree_context));
     }
 
-    RPNBuilder(const ASTPtr & filter_node,
-        ContextPtr query_context_,
-        Block block_with_constants_,
-        PreparedSetsPtr prepared_sets_,
-        const ExtractAtomFromTreeFunction & extract_atom_from_tree_function_)
-        : tree_context(std::move(query_context_), std::move(block_with_constants_), std::move(prepared_sets_))
-        , extract_atom_from_tree_function(extract_atom_from_tree_function_)
-    {
-        traverseTree(RPNBuilderTreeNode(filter_node.get(), tree_context));
-    }
-
     RPNElements && extractRPN() && { return std::move(rpn_elements); }
 
 private:
@@ -228,7 +222,13 @@ private:
                       * - in this case `n - 1` elements are added (where `n` is the number of arguments).
                       */
                     if (argument_index != 0 || element.function == RPNElement::FUNCTION_NOT)
-                        rpn_elements.emplace_back(std::move(element));
+                        rpn_elements.emplace_back(std::move(element)); /// NOLINT(bugprone-use-after-move,hicpp-invalid-access-moved)
+                }
+
+                if (arguments_size == 0 && function_node.getFunctionName() == "indexHint")
+                {
+                    element.function = RPNElement::ALWAYS_TRUE;
+                    rpn_elements.emplace_back(std::move(element));
                 }
 
                 return;

@@ -8,7 +8,7 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 $CLICKHOUSE_CLIENT --query="DROP TABLE IF EXISTS minmax_idx;"
 
 
-$CLICKHOUSE_CLIENT -n --query="
+$CLICKHOUSE_CLIENT --query="
 CREATE TABLE minmax_idx
 (
     u64 UInt64,
@@ -23,7 +23,7 @@ CREATE TABLE minmax_idx
     INDEX idx_2 (u64 + toYear(dt), substring(s, 2, 4)) TYPE minmax GRANULARITY 3
 ) ENGINE = MergeTree()
 ORDER BY u64
-SETTINGS index_granularity = 2;"
+SETTINGS index_granularity = 2, index_granularity_bytes = '10Mi';"
 
 
 $CLICKHOUSE_CLIENT --query="INSERT INTO minmax_idx VALUES

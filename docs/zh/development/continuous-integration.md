@@ -3,7 +3,7 @@ slug: /zh/development/continuous-integration
 ---
 # 持续集成检查 {#continuous-integration-checks}
 
-当你提交一个pull请求时, ClickHouse[持续集成(CI)系统](https://clickhouse.com/docs/en/development/tests/#test-automation)会对您的代码运行一些自动检查.
+当你提交一个pull请求时, ClickHouse[持续集成(CI)系统](/development/tests/#test-automation)会对您的代码运行一些自动检查.
 
 这在存储库维护者(来自ClickHouse团队的人)筛选了您的代码并将可测试标签添加到您的pull请求之后发生.
 
@@ -34,7 +34,7 @@ git push
 ## 描述信息检查 {#description-check}
 检查pull请求的描述是否符合[PULL_REQUEST_TEMPLATE.md](https://github.com/ClickHouse/ClickHouse/blob/master/.github/PULL_REQUEST_TEMPLATE.md)模板.
 
-您必须为您的更改指定一个更改日志类别(例如，Bug修复), 并且为[CHANGELOG.md](../whats-new/changelog/)编写一条用户可读的消息用来描述更改.
+您必须为您的更改指定一个更改日志类别(例如，Bug修复), 并且为[CHANGELOG.md](../whats-new/changelog/index.md)编写一条用户可读的消息用来描述更改.
 
 ## 推送到DockerHub {#push-to-dockerhub}
 生成用于构建和测试的docker映像, 然后将它们推送到DockerHub.
@@ -85,7 +85,6 @@ git push
 - **Build type**: `Debug` or `RelWithDebInfo` (cmake).
 - **Sanitizer**: `none` (without sanitizers), `address` (ASan), `memory` (MSan), `undefined` (UBSan), or `thread` (TSan).
 - **Bundled**: `bundled` 构建使用来自 `contrib` 库, 而 `unbundled` 构建使用系统库.
-- **Splitted**: `splitted` is a [split build](https://clickhouse.com/docs/en/development/build/#split-build)
 - **Status**: `成功` 或 `失败`
 - **Build log**: 链接到构建和文件复制日志, 当构建失败时很有用.
 - **Build time**.
@@ -97,8 +96,7 @@ git push
     - `clickhouse`: Main built binary.
     - `clickhouse-odbc-bridge`
     - `unit_tests_dbms`: 带有 ClickHouse 单元测试的 GoogleTest 二进制文件.
-    - `shared_build.tgz`: 使用共享库构建.
-    - `performance.tgz`: 用于性能测试的特殊包.
+    - `performance.tar.zst`: 用于性能测试的特殊包.
 
 ## 特殊构建检查 {#special-buildcheck}
 使用clang-tidy执行静态分析和代码样式检查. 该报告类似于构建检查. 修复在构建日志中发现的错误.
@@ -107,13 +105,10 @@ git push
 为构建在不同配置中的ClickHouse二进制文件运行[无状态功能测试](./tests.md#functional-tests)——发布、调试、使用杀毒软件等.通过报告查看哪些测试失败，然后按照[此处](./tests.md#functional-test-locally)描述的在本地重现失败.注意, 您必须使用正确的构建配置来重现——在AddressSanitizer下测试可能失败,但在Debug中可以通过.从[CI构建检查页面](./build.md#you-dont-have-to-build-clickhouse)下载二进制文件, 或者在本地构建它.
 
 ## 功能有状态测试 {#functional-stateful-tests}
-运行[有状态功能测试](./tests.md#functional-tests).以无状态功能测试相同的方式对待它们.不同之处在于它们需要从[Yandex.Metrica数据集](https://clickhouse.com/docs/en/getting-started/example-datasets/metrica/)的`hits`和`visits`表来运行.
+运行[有状态功能测试](./tests.md#functional-tests).以无状态功能测试相同的方式对待它们.不同之处在于它们需要从[Yandex.Metrica数据集](/getting-started/example-datasets/metrica/)的`hits`和`visits`表来运行.
 
 ## 集成测试 {#integration-tests}
 运行[集成测试](./tests.md#integration-tests).
-
-## Testflows 检查{#testflows-check}
-使用Testflows测试系统去运行一些测试, 在[此处](https://github.com/ClickHouse/ClickHouse/tree/master/tests/testflows#running-tests-locally)查看如何在本地运行它们.
 
 ## 压力测试 {#stress-test}
 从多个客户端并发运行无状态功能测试, 用以检测与并发相关的错误.如果失败:
@@ -121,14 +116,6 @@ git push
 * Fix all other test failures first;
 * Look at the report to find the server logs and check them for possible causes
   of error.
-```
-
-## 冒烟测试 {#split-build-smoke-test}
-检查[拆分构建](./build.md#split-build)配置中的服务器构建是否可以启动并运行简单查询.如果失败:
-```
-* Fix other test errors first;
-* Build the server in [split build](./build.md#split-build) configuration
-  locally and check whether it can start and run `select 1`.
 ```
 
 ## 兼容性检查 {#compatibility-check}

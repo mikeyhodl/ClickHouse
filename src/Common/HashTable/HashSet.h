@@ -6,8 +6,6 @@
 #include <Common/HashTable/TwoLevelHashTable.h>
 
 #include <IO/WriteBuffer.h>
-#include <IO/WriteHelpers.h>
-#include <IO/ReadBuffer.h>
 #include <IO/ReadHelpers.h>
 #include <IO/VarInt.h>
 
@@ -40,6 +38,8 @@ public:
     using Base = HashTable<Key, TCell, Hash, Grower, Allocator>;
     using typename Base::LookupResult;
 
+    using Base::Base;
+
     void merge(const Self & rhs)
     {
         if (!this->hasZero() && rhs.hasZero())
@@ -51,24 +51,6 @@ public:
         for (size_t i = 0; i < rhs.grower.bufSize(); ++i)
             if (!rhs.buf[i].isZero(*this))
                 this->insert(rhs.buf[i].getValue());
-    }
-
-
-    void readAndMerge(DB::ReadBuffer & rb)
-    {
-        Cell::State::read(rb);
-
-        size_t new_size = 0;
-        DB::readVarUInt(new_size, rb);
-
-        this->resize(new_size);
-
-        for (size_t i = 0; i < new_size; ++i)
-        {
-            Cell x;
-            x.read(rb);
-            this->insert(x.getValue());
-        }
     }
 };
 
@@ -121,8 +103,8 @@ struct HashSetCellWithSavedHash : public HashTableCell<Key, Hash, TState>
 
     size_t saved_hash;
 
-    HashSetCellWithSavedHash() : Base() {} //-V730
-    HashSetCellWithSavedHash(const Key & key_, const typename Base::State & state) : Base(key_, state) {} //-V730
+    HashSetCellWithSavedHash() : Base() {}
+    HashSetCellWithSavedHash(const Key & key_, const typename Base::State & state) : Base(key_, state) {}
 
     bool keyEquals(const Key & key_) const { return bitEquals(this->key, key_); }
     bool keyEquals(const Key & key_, size_t hash_) const { return saved_hash == hash_ && bitEquals(this->key, key_); }

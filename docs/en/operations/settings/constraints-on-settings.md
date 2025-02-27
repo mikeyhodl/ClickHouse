@@ -1,7 +1,9 @@
 ---
-slug: /en/operations/settings/constraints-on-settings
+slug: /operations/settings/constraints-on-settings
 sidebar_position: 62
 sidebar_label: Constraints on Settings
+title: "Constraints on Settings"
+description: "Constraints on settings can be defined in the `profiles` section of the `user.xml` configuration file and prohibit users from changing some of the settings with the `SET` query."
 ---
 
 # Constraints on Settings
@@ -36,11 +38,11 @@ The constraints are defined as the following:
 </profiles>
 ```
 
-If the user tries to violate the constraints an exception is thrown and the setting isn’t changed.
+If the user tries to violate the constraints an exception is thrown and the setting isn't changed.
 There are supported few types of constraints: `min`, `max`, `readonly` (with alias `const`) and `changeable_in_readonly`. The `min` and `max` constraints specify upper and lower boundaries for a numeric setting and can be used in combination. The `readonly` or `const` constraint specifies that the user cannot change the corresponding setting at all. The `changeable_in_readonly` constraint type allows user to change the setting within `min`/`max` range even if `readonly` setting is set to 1, otherwise settings are not allow to be changed in `readonly=1` mode. Note that `changeable_in_readonly` is supported only if `settings_constraints_replace_previous` is enabled:
 ``` xml
 <access_control_improvements>
-  <settings_constraints_replace_previous>true<settings_constraints_replace_previous>
+  <settings_constraints_replace_previous>true</settings_constraints_replace_previous>
 </access_control_improvements>
 ```
 
@@ -50,7 +52,7 @@ If there are multiple profiles active for a user, then constraints are merged. M
 
 Read-only mode is enabled by `readonly` setting (not to confuse with `readonly` constraint type):
 - `readonly=0`: No read-only restrictions.
-- `readonly=1`: Only read queries are allowed and settings cannot be changes unless `changeable_in_readonly` is set.
+- `readonly=1`: Only read queries are allowed and settings cannot be changed unless `changeable_in_readonly` is set.
 - `readonly=2`: Only read queries are allowed, but settings can be changed, except for `readonly` setting itself.
 
 
@@ -89,6 +91,21 @@ Code: 452, e.displayText() = DB::Exception: Setting max_memory_usage should not 
 Code: 452, e.displayText() = DB::Exception: Setting force_index_by_date should not be changed.
 ```
 
-**Note:** the `default` profile has special handling: all the constraints defined for the `default` profile become the default constraints, so they restrict all the users until they’re overridden explicitly for these users.
+**Note:** the `default` profile has special handling: all the constraints defined for the `default` profile become the default constraints, so they restrict all the users until they're overridden explicitly for these users.
 
-[Original article](https://clickhouse.com/docs/en/operations/settings/constraints_on_settings/) <!--hide-->
+## Constraints on Merge Tree Settings {#constraints-on-merge-tree-settings}
+It is possible to set constraints for [merge tree settings](merge-tree-settings.md). These constraints are applied when table with merge tree engine is created or its storage settings are altered. Name of merge tree setting must be prepended by `merge_tree_` prefix when referenced in `<constraints>` section.
+
+**Example:** Forbid to create new tables with explicitly specified `storage_policy`
+
+``` xml
+<profiles>
+  <default>
+    <constraints>
+      <merge_tree_storage_policy>
+        <const/>
+      </merge_tree_storage_policy>
+    </constraints>
+  </default>
+</profiles>
+```

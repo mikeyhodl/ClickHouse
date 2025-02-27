@@ -1,16 +1,14 @@
 #pragma once
 
-#include <functional>
 #include <IO/ReadBuffer.h>
 #include <IO/ReadHelpers.h>
 #include <IO/WriteBuffer.h>
 #include <IO/WriteHelpers.h>
 #include <Interpreters/Session.h>
 #include <Common/logger_useful.h>
-#include <Poco/Format.h>
 #include <Poco/RegularExpression.h>
 #include <Poco/Net/StreamSocket.h>
-#include "Types.h"
+#include <Parsers/ParserPreparedStatement.h>
 #include <unordered_map>
 #include <utility>
 
@@ -19,10 +17,12 @@ namespace DB
 
 namespace ErrorCodes
 {
+    extern const int BAD_ARGUMENTS;
     extern const int UNKNOWN_PACKET_FROM_CLIENT;
     extern const int UNEXPECTED_PACKET_FROM_CLIENT;
     extern const int NOT_IMPLEMENTED;
     extern const int UNKNOWN_TYPE;
+    extern const int LIMIT_EXCEEDED;
 }
 
 
@@ -49,6 +49,7 @@ enum class FrontMessageType : Int32
     SYNC = 'S',
     FLUSH = 'H',
     CLOSE = 'C',
+    EXECUTE = 'E',
 };
 
 enum class MessageType : Int32
@@ -62,6 +63,7 @@ enum class MessageType : Int32
     PARAMETER_STATUS = 5,
     READY_FOR_QUERY = 6,
     SYNC = 7,
+    SYNC_COMPLETE = 7,
     TERMINATE = 8,
 
 // start up and authentication
@@ -307,7 +309,7 @@ private:
             case LOG:
                 return 'N';
         }
-        throw Exception("Unknown severity type " + std::to_string(severity), ErrorCodes::UNKNOWN_TYPE);
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Unknown severity type {}", std::to_string(severity));
     }
 
 public:
@@ -423,11 +425,9 @@ public:
 
             if (payload_size < 0)
             {
-                throw Exception(
-                        Poco::format(
-                                "Size of payload is larger than one declared in the message of type %d.",
-                                getMessageType()),
-                        ErrorCodes::UNKNOWN_PACKET_FROM_CLIENT);
+                throw Exception(ErrorCodes::UNKNOWN_PACKET_FROM_CLIENT,
+                                "Size of payload is larger than one declared in the message of type {}.",
+                                static_cast<UInt64>(getMessageType()));
             }
         }
         in.ignore();
@@ -581,6 +581,162 @@ public:
     }
 };
 
+class ParseQuery : FrontMessage
+{
+public:
+    String function_name;
+    String sql_query;
+    Int16 num_params;
+
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+        readNullTerminated(function_name, in);
+        readNullTerminated(sql_query, in);
+        readBinaryBigEndian(num_params, in);
+        Int32 oid_param;
+        for (int i = 0; i < num_params; ++i)
+            readBinaryBigEndian(oid_param, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::PARSE;
+    }
+};
+
+class ParseQueryComplete : BackendMessage
+{
+public:
+    ParseQueryComplete() = default;
+
+    void serialize(WriteBuffer & out) const override
+    {
+        out.write('1');
+        writeBinaryBigEndian(size(), out);
+    }
+
+    Int32 size() const override
+    {
+        return 4;
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::PARSE_COMPLETE;
+    }
+};
+
+class BindQuery : FrontMessage
+{
+public:
+    String portal_name;
+    String function_name;
+    std::vector<String> parameters;
+    Int16 num_params;
+
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+        readNullTerminated(portal_name, in);
+        readNullTerminated(function_name, in);
+
+        Int16 num_format_params;
+        readBinaryBigEndian(num_format_params, in);
+        Int16 format_param;
+        for (Int16 i = 0; i < num_format_params; ++i)
+        {
+            readBinaryBigEndian(format_param, in);
+        }
+        readBinaryBigEndian(num_params, in);
+        for (int i = 0; i < num_params; ++i)
+        {
+            Int32 sz_param;
+            readBinaryBigEndian(sz_param, in);
+            String current_param(sz_param, 0);
+            in.readStrict(current_param.data(), sz_param);
+            parameters.push_back(current_param);
+        }
+
+        Int16 num_format_params_result;
+        readBinaryBigEndian(num_format_params_result, in);
+        Int16 format_param_result;
+        for (Int16 i = 0; i < num_format_params_result; ++i)
+            readBinaryBigEndian(format_param_result, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::BIND;
+    }
+};
+
+class BindQueryComplete : BackendMessage
+{
+public:
+    BindQueryComplete() = default;
+
+    void serialize(WriteBuffer & out) const override
+    {
+        out.write('2');
+        writeBinaryBigEndian(size(), out);
+    }
+
+    Int32 size() const override
+    {
+        return 4;
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::BIND_COMPLETE;
+    }
+};
+
+class DescribeQuery : FrontMessage
+{
+public:
+    char describe;
+    String function_name;
+
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+        in.readStrict(&describe, 1);
+        readNullTerminated(function_name, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::DESCRIBE;
+    }
+
+};
+
+class ExecuteQuery : FrontMessage
+{
+public:
+    String portal_name;
+    Int32 max_rows;
+
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+        readNullTerminated(portal_name, in);
+        readBinaryBigEndian(max_rows, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::BIND;
+    }
+
+};
+
 class EmptyQueryResponse : public BackendMessage
 {
 public:
@@ -605,6 +761,61 @@ enum class FormatCode : Int16
 {
     TEXT = 0,
     BINARY = 1,
+};
+
+class CloseQuery : FrontMessage
+{
+public:
+    String function_name;
+
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+        Int8 byte;
+        readBinaryBigEndian(byte, in);
+        readNullTerminated(function_name, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::CLOSE;
+    }
+};
+
+class CloseQueryComplete : BackendMessage
+{
+public:
+    void serialize(WriteBuffer & out) const override
+    {
+        out.write('C');
+        writeBinaryBigEndian(size(), out);
+    }
+
+    Int32 size() const override
+    {
+        return 4;
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::CLOSE_COMPLETE;
+    }
+};
+
+class SyncQuery : FrontMessage
+{
+public:
+    void deserialize(ReadBuffer & in) override
+    {
+        Int32 sz;
+        readBinaryBigEndian(sz, in);
+    }
+
+    MessageType getMessageType() const override
+    {
+        return MessageType::SYNC;
+    }
 };
 
 class FieldDescription : ISerializable
@@ -742,9 +953,9 @@ public:
 class CommandComplete : BackendMessage
 {
 public:
-    enum Command {BEGIN = 0, COMMIT = 1, INSERT = 2, DELETE = 3, UPDATE = 4, SELECT = 5, MOVE = 6, FETCH = 7, COPY = 8};
+    enum Command {BEGIN = 0, COMMIT = 1, INSERT = 2, DELETE = 3, UPDATE = 4, SELECT = 5, MOVE = 6, FETCH = 7, COPY = 8, EXECUTE = 9};
 private:
-    String enum_to_string[9] = {"BEGIN", "COMMIT", "INSERT", "DELETE", "UPDATE", "SELECT", "MOVE", "FETCH", "COPY"};
+    String enum_to_string[10] = {"BEGIN", "COMMIT", "INSERT", "DELETE", "UPDATE", "SELECT", "MOVE", "FETCH", "COPY", "EXECUTE"};
 
     String value;
 
@@ -777,7 +988,7 @@ public:
 
     static Command classifyQuery(const String & query)
     {
-        std::vector<String> query_types({"BEGIN", "COMMIT", "INSERT", "DELETE", "UPDATE", "SELECT", "MOVE", "FETCH", "COPY"});
+        std::vector<String> query_types({"BEGIN", "COMMIT", "INSERT", "DELETE", "UPDATE", "SELECT", "MOVE", "FETCH", "COPY", "EXECUTE"});
         for (size_t i = 0; i != query_types.size(); ++i)
         {
             String::const_iterator iter = std::search(
@@ -807,20 +1018,9 @@ protected:
         const String & user_name,
         const String & password,
         Session & session,
-        Messaging::MessageTransport & mt,
         const Poco::Net::SocketAddress & address)
     {
-        try
-        {
-            session.authenticate(user_name, password, address);
-        }
-        catch (const Exception &)
-        {
-            mt.send(
-                Messaging::ErrorOrNoticeResponse(Messaging::ErrorOrNoticeResponse::ERROR, "28P01", "Invalid user or password"),
-                true);
-            throw;
-        }
+        session.authenticate(user_name, password, address);
     }
 
 public:
@@ -841,10 +1041,10 @@ public:
     void authenticate(
         const String & user_name,
         Session & session,
-        Messaging::MessageTransport & mt,
+        [[maybe_unused]] Messaging::MessageTransport & mt,
         const Poco::Net::SocketAddress & address) override
     {
-        return setPassword(user_name, "", session, mt, address);
+        setPassword(user_name, "", session, address);
     }
 
     AuthenticationType getType() const override
@@ -868,14 +1068,12 @@ public:
         if (type == Messaging::FrontMessageType::PASSWORD_MESSAGE)
         {
             std::unique_ptr<Messaging::PasswordMessage> password = mt.receive<Messaging::PasswordMessage>();
-            return setPassword(user_name, password->password, session, mt, address);
+            setPassword(user_name, password->password, session, address);
         }
         else
-            throw Exception(
-                Poco::format(
-                    "Client sent wrong message or closed the connection. Message byte was %d.",
-                    static_cast<Int32>(type)),
-                ErrorCodes::UNEXPECTED_PACKET_FROM_CLIENT);
+            throw Exception(ErrorCodes::UNEXPECTED_PACKET_FROM_CLIENT,
+                    "Client sent wrong message or closed the connection. Message byte was {}.",
+                    static_cast<Int32>(type));
     }
 
     AuthenticationType getType() const override
@@ -887,7 +1085,7 @@ public:
 class AuthenticationManager
 {
 private:
-    Poco::Logger * log = &Poco::Logger::get("AuthenticationManager");
+    LoggerPtr log = getLogger("AuthenticationManager");
     std::unordered_map<AuthenticationType, std::shared_ptr<AuthenticationMethod>> type_to_method = {};
 
 public:
@@ -905,22 +1103,117 @@ public:
         Messaging::MessageTransport & mt,
         const Poco::Net::SocketAddress & address)
     {
-        const AuthenticationType user_auth_type = session.getAuthenticationTypeOrLogInFailure(user_name);
-        if (type_to_method.find(user_auth_type) != type_to_method.end())
+        try
         {
-            type_to_method[user_auth_type]->authenticate(user_name, session, mt, address);
-            mt.send(Messaging::AuthenticationOk(), true);
-            LOG_DEBUG(log, "Authentication for user {} was successful.", user_name);
-            return;
+            const auto user_authentication_types = session.getAuthenticationTypesOrLogInFailure(user_name);
+
+            for (auto user_authentication_type : user_authentication_types)
+            {
+                if (type_to_method.find(user_authentication_type) != type_to_method.end())
+                {
+                    type_to_method[user_authentication_type]->authenticate(user_name, session, mt, address);
+                    mt.send(Messaging::AuthenticationOk(), true);
+                    LOG_DEBUG(log, "Authentication for user {} was successful.", user_name);
+                    return;
+                }
+            }
+        }
+        catch (const Exception&)
+        {
+            mt.send(Messaging::ErrorOrNoticeResponse(Messaging::ErrorOrNoticeResponse::ERROR, "28P01", "Invalid user or password"),
+                    true);
+
+            throw;
         }
 
-        mt.send(
-            Messaging::ErrorOrNoticeResponse(Messaging::ErrorOrNoticeResponse::ERROR, "0A000", "Authentication method is not supported"),
-            true);
+        mt.send(Messaging::ErrorOrNoticeResponse(Messaging::ErrorOrNoticeResponse::ERROR, "0A000", "Authentication method is not supported"),
+                true);
 
-        throw Exception(Poco::format("Authentication type %d is not supported.", user_auth_type), ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "None of the authentication methods registered for the user are supported");
     }
 };
+}
+
+namespace PostgresPreparedStatements
+{
+
+class PreparedStatemetsManager
+{
+public:
+    explicit PreparedStatemetsManager(std::optional<size_t> limit_statements_)
+        : limit_statements(limit_statements_)
+    {
+    }
+
+    void addStatement(ASTPreparedStatement * statement)
+    {
+        if (limit_statements && statements.size() + 1 >= limit_statements.value())
+            throw Exception(ErrorCodes::LIMIT_EXCEEDED, "Statements limit exceeded");
+
+        statements[statement->function_name] = statement->function_body;
+    }
+
+    String getStatement(ASTExecute * execute)
+    {
+        return getStatement(execute->function_name, execute->arguments);
+    }
+
+    void deleteStatement(ASTDeallocate * query)
+    {
+        auto it = statements.find(query->function_name);
+        if (it == statements.end())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown statement");
+
+        statements.erase(it);
+    }
+
+    void attachBindQuery(std::unique_ptr<PostgreSQLProtocol::Messaging::BindQuery> query)
+    {
+        if (bind_query)
+            throw Exception(ErrorCodes::UNEXPECTED_PACKET_FROM_CLIENT, "Query is already binded");
+
+        bind_query = std::move(query);
+    }
+
+    String getStatmentFromBind()
+    {
+        auto result = getStatement(bind_query->function_name, bind_query->parameters);
+
+        return result;
+    }
+
+    void resetBindQuery(const String& function_name)
+    {
+        statements.erase(function_name);
+        bind_query.reset();
+    }
+
+private:
+    std::unordered_map<String, String> statements;
+    std::optional<size_t> limit_statements;
+    std::unique_ptr<PostgreSQLProtocol::Messaging::BindQuery> bind_query;
+
+    String getStatement(const String & function_name, const std::vector<String> & arguments)
+    {
+        auto it = statements.find(function_name);
+        if (it == statements.end())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown statement");
+
+        auto body = it->second;
+        for (size_t i = 0; i < arguments.size(); ++i)
+        {
+            auto templ = "$" + std::to_string(i + 1);
+            auto pos = body.find(templ);
+            if (pos != std::string::npos)
+            {
+                body.replace(pos, templ.size(), arguments[i]);
+            }
+        }
+        return body;
+    }
+
+};
+
 }
 
 }

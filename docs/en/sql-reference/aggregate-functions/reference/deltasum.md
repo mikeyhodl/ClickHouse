@@ -1,6 +1,8 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/deltasum
-sidebar_position: 141
+slug: /sql-reference/aggregate-functions/reference/deltasum
+sidebar_position: 129
+title: "deltaSum"
+description: "Sums the arithmetic difference between consecutive rows."
 ---
 
 # deltaSum
@@ -19,7 +21,7 @@ deltaSum(value)
 
 **Arguments**
 
--   `value` — Input values, must be [Integer](../../data-types/int-uint.md) or [Float](../../data-types/float.md) type.
+- `value` — Input values, must be [Integer](../../data-types/int-uint.md) or [Float](../../data-types/float.md) type.
 
 **Returned value**
 
@@ -69,6 +71,6 @@ Result:
 └─────────────────────────────────────┘
 ```
 
-## See Also
+## See Also {#see-also}
 
--   [runningDifference](../../functions/other-functions.md#other_functions-runningdifference)
+- [runningDifference](../../functions/other-functions.md#other_functions-runningdifference)

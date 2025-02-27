@@ -1,7 +1,9 @@
 ---
-slug: /en/operations/system-tables/numbers
+description: "System table containing a single UInt64 column named `number` that contains almost all the natural numbers starting from zero."
+slug: /operations/system-tables/numbers
+title: "numbers"
+keywords: ["system table", "numbers"]
 ---
-# numbers
 
 This table contains a single UInt64 column named `number` that contains almost all the natural numbers starting from zero.
 
@@ -12,10 +14,10 @@ Reads from this table are not parallelized.
 **Example**
 
 ```sql
-:) SELECT * FROM system.numbers LIMIT 10;
+SELECT * FROM system.numbers LIMIT 10;
 ```
 
-```text
+```response
 ┌─number─┐
 │      0 │
 │      1 │
@@ -32,4 +34,25 @@ Reads from this table are not parallelized.
 10 rows in set. Elapsed: 0.001 sec.
 ```
 
-[Original article](https://clickhouse.com/docs/en/operations/system-tables/numbers) <!--hide-->
+You can also limit the output by predicates.
+
+```sql
+SELECT * FROM system.numbers < 10;
+```
+
+```response
+┌─number─┐
+│      0 │
+│      1 │
+│      2 │
+│      3 │
+│      4 │
+│      5 │
+│      6 │
+│      7 │
+│      8 │
+│      9 │
+└────────┘
+
+10 rows in set. Elapsed: 0.001 sec.
+```

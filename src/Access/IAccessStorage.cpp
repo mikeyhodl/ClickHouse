@@ -4,18 +4,25 @@
 #include <Access/User.h>
 #include <Access/AccessBackup.h>
 #include <Backups/BackupEntriesCollector.h>
+#include <Backups/IBackupCoordination.h>
+#include <Backups/IRestoreCoordination.h>
+#include <Backups/RestoreSettings.h>
+#include <Backups/RestorerFromBackup.h>
 #include <Common/Exception.h>
 #include <Common/quoteString.h>
+#include <Common/callOnce.h>
 #include <IO/WriteHelpers.h>
 #include <Interpreters/Context.h>
 #include <Poco/UUIDGenerator.h>
 #include <Poco/Logger.h>
 #include <base/FnTraits.h>
+#include <base/range.h>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/range/adaptor/map.hpp>
 #include <boost/range/adaptor/reversed.hpp>
+#include <boost/range/algorithm/copy.hpp>
 #include <boost/range/algorithm_ext/erase.hpp>
-
 
 namespace DB
 {
@@ -29,7 +36,6 @@ namespace ErrorCodes
     extern const int IP_ADDRESS_NOT_ALLOWED;
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
-    extern const int AUTHENTICATION_FAILED;
 }
 
 
@@ -68,6 +74,18 @@ std::vector<UUID> IAccessStorage::find(AccessEntityType type, const Strings & na
 }
 
 
+std::vector<UUID> IAccessStorage::findAllImpl() const
+{
+    std::vector<UUID> res;
+    for (auto type : collections::range(AccessEntityType::MAX))
+    {
+        auto ids = findAllImpl(type);
+        res.insert(res.end(), ids.begin(), ids.end());
+    }
+    return res;
+}
+
+
 UUID IAccessStorage::getID(AccessEntityType type, const String & name) const
 {
     auto id = findImpl(type, name);
@@ -92,6 +110,17 @@ String IAccessStorage::readName(const UUID & id) const
     return readNameWithType(id).first;
 }
 
+
+bool IAccessStorage::exists(const std::vector<UUID> & ids) const
+{
+    for (const auto & id : ids)
+    {
+        if (!exists(id))
+            return false;
+    }
+
+    return true;
+}
 
 std::optional<String> IAccessStorage::readName(const UUID & id, bool throw_if_not_exists) const
 {
@@ -167,38 +196,69 @@ UUID IAccessStorage::insert(const AccessEntityPtr & entity)
     return *insert(entity, /* replace_if_exists = */ false, /* throw_if_exists = */ true);
 }
 
-
-std::optional<UUID> IAccessStorage::insert(const AccessEntityPtr & entity, bool replace_if_exists, bool throw_if_exists)
+std::optional<UUID> IAccessStorage::insert(const AccessEntityPtr & entity, bool replace_if_exists, bool throw_if_exists, UUID * conflicting_id)
 {
-    return insertImpl(entity, replace_if_exists, throw_if_exists);
+    auto id = generateRandomID();
+
+    if (insert(id, entity, replace_if_exists, throw_if_exists, conflicting_id))
+        return id;
+
+    return std::nullopt;
+}
+
+
+bool IAccessStorage::insert(const DB::UUID & id, const DB::AccessEntityPtr & entity, bool replace_if_exists, bool throw_if_exists, UUID * conflicting_id)
+{
+    return insertImpl(id, entity, replace_if_exists, throw_if_exists, conflicting_id);
 }
 
 
 std::vector<UUID> IAccessStorage::insert(const std::vector<AccessEntityPtr> & multiple_entities, bool replace_if_exists, bool throw_if_exists)
 {
+    return insert(multiple_entities, /* ids = */ {}, replace_if_exists, throw_if_exists);
+}
+
+std::vector<UUID> IAccessStorage::insert(const std::vector<AccessEntityPtr> & multiple_entities, const std::vector<UUID> & ids, bool replace_if_exists, bool throw_if_exists)
+{
+    assert(ids.empty() || (multiple_entities.size() == ids.size()));
+
     if (multiple_entities.empty())
         return {};
 
     if (multiple_entities.size() == 1)
     {
-        if (auto id = insert(multiple_entities[0], replace_if_exists, throw_if_exists))
-            return {*id};
+        UUID id;
+        if (!ids.empty())
+            id = ids[0];
+        else
+            id = generateRandomID();
+
+        if (insert(id, multiple_entities[0], replace_if_exists, throw_if_exists))
+            return {id};
         return {};
     }
 
     std::vector<AccessEntityPtr> successfully_inserted;
     try
     {
-        std::vector<UUID> ids;
-        for (const auto & entity : multiple_entities)
+        std::vector<UUID> new_ids;
+        for (size_t i = 0; i < multiple_entities.size(); ++i)
         {
-            if (auto id = insertImpl(entity, replace_if_exists, throw_if_exists))
+            const auto & entity = multiple_entities[i];
+
+            UUID id;
+            if (!ids.empty())
+                id = ids[i];
+            else
+                id = generateRandomID();
+
+            if (insert(id, entity, replace_if_exists, throw_if_exists))
             {
                 successfully_inserted.push_back(entity);
-                ids.push_back(*id);
+                new_ids.push_back(id);
             }
         }
-        return ids;
+        return new_ids;
     }
     catch (Exception & e)
     {
@@ -214,8 +274,7 @@ std::vector<UUID> IAccessStorage::insert(const std::vector<AccessEntityPtr> & mu
             }
             e.addMessage("After successfully inserting {}/{}: {}", successfully_inserted.size(), multiple_entities.size(), successfully_inserted_str);
         }
-        e.rethrow();
-        UNREACHABLE();
+        throw;
     }
 }
 
@@ -244,7 +303,7 @@ std::vector<UUID> IAccessStorage::insertOrReplace(const std::vector<AccessEntity
 }
 
 
-std::optional<UUID> IAccessStorage::insertImpl(const AccessEntityPtr & entity, bool, bool)
+bool IAccessStorage::insertImpl(const UUID &, const AccessEntityPtr & entity, bool, bool, UUID *)
 {
     if (isReadOnly())
         throwReadonlyCannotInsert(entity->getType(), entity->getName());
@@ -318,8 +377,7 @@ std::vector<UUID> IAccessStorage::remove(const std::vector<UUID> & ids, bool thr
             }
             e.addMessage("After successfully removing {}/{}: {}", removed_names.size(), ids.size(), removed_names_str);
         }
-        e.rethrow();
-        UNREACHABLE();
+        throw;
     }
 }
 
@@ -415,8 +473,7 @@ std::vector<UUID> IAccessStorage::update(const std::vector<UUID> & ids, const Up
             }
             e.addMessage("After successfully updating {}/{}: {}", names_of_updated.size(), ids.size(), names_of_updated_str);
         }
-        e.rethrow();
-        UNREACHABLE();
+        throw;
     }
 }
 
@@ -446,7 +503,7 @@ bool IAccessStorage::updateImpl(const UUID & id, const UpdateFunc &, bool throw_
 }
 
 
-UUID IAccessStorage::authenticate(
+AuthResult IAccessStorage::authenticate(
     const Credentials & credentials,
     const Poco::Net::IPAddress & address,
     const ExternalAuthenticators & external_authenticators,
@@ -457,7 +514,7 @@ UUID IAccessStorage::authenticate(
 }
 
 
-std::optional<UUID> IAccessStorage::authenticate(
+std::optional<AuthResult> IAccessStorage::authenticate(
     const Credentials & credentials,
     const Poco::Net::IPAddress & address,
     const ExternalAuthenticators & external_authenticators,
@@ -469,7 +526,7 @@ std::optional<UUID> IAccessStorage::authenticate(
 }
 
 
-std::optional<UUID> IAccessStorage::authenticateImpl(
+std::optional<AuthResult> IAccessStorage::authenticateImpl(
     const Credentials & credentials,
     const Poco::Net::IPAddress & address,
     const ExternalAuthenticators & external_authenticators,
@@ -481,18 +538,36 @@ std::optional<UUID> IAccessStorage::authenticateImpl(
     {
         if (auto user = tryRead<User>(*id))
         {
+            AuthResult auth_result { .user_id = *id };
             if (!isAddressAllowed(*user, address))
                 throwAddressNotAllowed(address);
 
-            auto auth_type = user->auth_data.getType();
-            if (((auth_type == AuthenticationType::NO_PASSWORD) && !allow_no_password) ||
-                ((auth_type == AuthenticationType::PLAINTEXT_PASSWORD) && !allow_plaintext_password))
-                throwAuthenticationTypeNotAllowed(auth_type);
+            bool skipped_not_allowed_authentication_methods = false;
 
-            if (!areCredentialsValid(*user, credentials, external_authenticators))
-                throwInvalidCredentials();
+            for (const auto & auth_method : user->authentication_methods)
+            {
+                auto auth_type = auth_method.getType();
+                if (((auth_type == AuthenticationType::NO_PASSWORD) && !allow_no_password) ||
+                    ((auth_type == AuthenticationType::PLAINTEXT_PASSWORD) && !allow_plaintext_password))
+                {
+                    skipped_not_allowed_authentication_methods = true;
+                    continue;
+                }
 
-            return id;
+                if (areCredentialsValid(user->getName(), auth_method, credentials, external_authenticators, auth_result.settings))
+                {
+                    auth_result.authentication_data = auth_method;
+                    return auth_result;
+                }
+            }
+
+            if (skipped_not_allowed_authentication_methods)
+            {
+                LOG_INFO(log, "Skipped the check for not allowed authentication methods,"
+                              "check allow_no_password and allow_plaintext_password settings in the server configuration");
+            }
+
+            throwInvalidCredentials();
         }
     }
 
@@ -502,21 +577,30 @@ std::optional<UUID> IAccessStorage::authenticateImpl(
         return std::nullopt;
 }
 
-
 bool IAccessStorage::areCredentialsValid(
-    const User & user,
+    const std::string & user_name,
+    const AuthenticationData & authentication_method,
     const Credentials & credentials,
-    const ExternalAuthenticators & external_authenticators) const
+    const ExternalAuthenticators & external_authenticators,
+    SettingsChanges & settings) const
 {
     if (!credentials.isReady())
         return false;
 
-    if (credentials.getUserName() != user.getName())
+    if (credentials.getUserName() != user_name)
         return false;
 
-    return Authentication::areCredentialsValid(credentials, user.auth_data, external_authenticators);
-}
+    auto valid_until = authentication_method.getValidUntil();
+    if (valid_until)
+    {
+        const time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
+        if (now > valid_until)
+            return false;
+    }
+
+    return Authentication::areCredentialsValid(credentials, authentication_method, external_authenticators, settings);
+}
 
 bool IAccessStorage::isAddressAllowed(const User & user, const Poco::Net::IPAddress & address) const
 {
@@ -529,28 +613,59 @@ void IAccessStorage::backup(BackupEntriesCollector & backup_entries_collector, c
     if (!isBackupAllowed())
         throwBackupNotAllowed();
 
-    auto entities = readAllWithIDs(type);
-    boost::range::remove_erase_if(entities, [](const std::pair<UUID, AccessEntityPtr> & x) { return !x.second->isBackupAllowed(); });
-
-    if (entities.empty())
+    auto entities_ids = findAll(type);
+    if (entities_ids.empty())
         return;
 
-    auto backup_entry = makeBackupEntryForAccess(
-        entities,
-        data_path_in_backup,
-        backup_entries_collector.getAccessCounter(type),
-        backup_entries_collector.getContext()->getAccessControl());
+    auto backup_entry_with_path = makeBackupEntryForAccessEntities(
+        entities_ids,
+        backup_entries_collector.getAllAccessEntities(),
+        backup_entries_collector.getBackupSettings().write_access_entities_dependents,
+        data_path_in_backup);
 
-    backup_entries_collector.addBackupEntry(backup_entry);
+    if (isReplicated())
+    {
+        auto backup_coordination = backup_entries_collector.getBackupCoordination();
+        auto replication_id = getReplicationID();
+        backup_coordination->addReplicatedAccessFilePath(replication_id, type, backup_entry_with_path.first);
+
+        backup_entries_collector.addPostTask(
+            [backup_entry = backup_entry_with_path.second,
+            replication_id,
+            type,
+            &backup_entries_collector,
+            backup_coordination]
+            {
+                for (const String & path : backup_coordination->getReplicatedAccessFilePaths(replication_id, type))
+                    backup_entries_collector.addBackupEntry(path, backup_entry);
+            });
+    }
+    else
+    {
+        backup_entries_collector.addBackupEntry(backup_entry_with_path);
+    }
 }
 
 
-void IAccessStorage::restoreFromBackup(RestorerFromBackup &)
+void IAccessStorage::restoreFromBackup(RestorerFromBackup & restorer, const String & data_path_in_backup)
 {
     if (!isRestoreAllowed())
         throwRestoreNotAllowed();
 
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "restoreFromBackup() is not implemented in {}", getStorageType());
+    if (isReplicated())
+    {
+        auto restore_coordination = restorer.getRestoreCoordination();
+        if (!restore_coordination->acquireReplicatedAccessStorage(getReplicationID()))
+            return;
+    }
+
+    restorer.addDataRestoreTask(
+        [this, &restorer, data_path_in_backup]
+        {
+            auto entities_to_restore = restorer.getAccessEntitiesToRestore(data_path_in_backup);
+            const auto & restore_settings = restorer.getRestoreSettings();
+            restoreAccessEntitiesFromBackup(*this, entities_to_restore, restore_settings);
+        });
 }
 
 
@@ -563,7 +678,7 @@ UUID IAccessStorage::generateRandomID()
 }
 
 
-void IAccessStorage::clearConflictsInEntitiesList(std::vector<std::pair<UUID, AccessEntityPtr>> & entities, const Poco::Logger * log_)
+void IAccessStorage::clearConflictsInEntitiesList(std::vector<std::pair<UUID, AccessEntityPtr>> & entities, LoggerPtr log_)
 {
     std::unordered_map<UUID, size_t> positions_by_id;
     std::unordered_map<std::string_view, size_t> positions_by_type_and_name[static_cast<size_t>(AccessEntityType::MAX)];
@@ -619,103 +734,87 @@ void IAccessStorage::clearConflictsInEntitiesList(std::vector<std::pair<UUID, Ac
 }
 
 
-Poco::Logger * IAccessStorage::getLogger() const
+LoggerPtr IAccessStorage::getLogger() const
 {
-    Poco::Logger * ptr = log.load();
-    if (!ptr)
-        log.store(ptr = &Poco::Logger::get("Access(" + storage_name + ")"), std::memory_order_relaxed);
-    return ptr;
+    callOnce(log_initialized, [&] {
+        log = ::getLogger("Access(" + storage_name + ")");
+    });
+
+    return log;
 }
 
 
 void IAccessStorage::throwNotFound(const UUID & id) const
 {
-    throw Exception(outputID(id) + " not found in " + getStorageName(), ErrorCodes::ACCESS_ENTITY_NOT_FOUND);
+    throw Exception(ErrorCodes::ACCESS_ENTITY_NOT_FOUND, "{} not found in {}", outputID(id), getStorageName());
 }
 
 
 void IAccessStorage::throwNotFound(AccessEntityType type, const String & name) const
 {
     int error_code = AccessEntityTypeInfo::get(type).not_found_error_code;
-    throw Exception("There is no " + formatEntityTypeWithName(type, name) + " in " + getStorageName(), error_code);
+    throw Exception(error_code, "There is no {} in {}", formatEntityTypeWithName(type, name), getStorageName());
 }
 
 
 void IAccessStorage::throwBadCast(const UUID & id, AccessEntityType type, const String & name, AccessEntityType required_type)
 {
-    throw Exception(
-        outputID(id) + ": " + formatEntityTypeWithName(type, name) + " expected to be of type " + toString(required_type),
-        ErrorCodes::LOGICAL_ERROR);
+    throw Exception(ErrorCodes::LOGICAL_ERROR, "{}: {} expected to be of type {}", outputID(id),
+        formatEntityTypeWithName(type, name), toString(required_type));
 }
 
 
 void IAccessStorage::throwIDCollisionCannotInsert(const UUID & id, AccessEntityType type, const String & name, AccessEntityType existing_type, const String & existing_name) const
 {
-    throw Exception(
-        formatEntityTypeWithName(type, name) + ": cannot insert because the " + outputID(id) + " is already used by "
-            + formatEntityTypeWithName(existing_type, existing_name) + " in " + getStorageName(),
-        ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS);
+    throw Exception(ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS, "{}: "
+        "cannot insert because the {} is already used by {} in {}", formatEntityTypeWithName(type, name),
+        outputID(id), formatEntityTypeWithName(existing_type, existing_name), getStorageName());
 }
 
 
 void IAccessStorage::throwNameCollisionCannotInsert(AccessEntityType type, const String & name) const
 {
-    throw Exception(
-        formatEntityTypeWithName(type, name) + ": cannot insert because " + formatEntityTypeWithName(type, name) + " already exists in "
-            + getStorageName(),
-        ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS);
+    throw Exception(ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS, "{}: cannot insert because {} already exists in {}",
+                    formatEntityTypeWithName(type, name), formatEntityTypeWithName(type, name), getStorageName());
 }
 
 
 void IAccessStorage::throwNameCollisionCannotRename(AccessEntityType type, const String & old_name, const String & new_name) const
 {
-    throw Exception(
-        formatEntityTypeWithName(type, old_name) + ": cannot rename to " + backQuote(new_name) + " because "
-            + formatEntityTypeWithName(type, new_name) + " already exists in " + getStorageName(),
-        ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS);
+    throw Exception(ErrorCodes::ACCESS_ENTITY_ALREADY_EXISTS, "{}: cannot rename to {} because {} already exists in {}",
+        formatEntityTypeWithName(type, old_name), backQuote(new_name), formatEntityTypeWithName(type, new_name), getStorageName());
 }
 
 
 void IAccessStorage::throwReadonlyCannotInsert(AccessEntityType type, const String & name) const
 {
-    throw Exception(
-        "Cannot insert " + formatEntityTypeWithName(type, name) + " to " + getStorageName() + " because this storage is readonly",
-        ErrorCodes::ACCESS_STORAGE_READONLY);
+    throw Exception(ErrorCodes::ACCESS_STORAGE_READONLY, "Cannot insert {} to {} because this storage is readonly",
+        formatEntityTypeWithName(type, name), getStorageName());
 }
 
 
 void IAccessStorage::throwReadonlyCannotUpdate(AccessEntityType type, const String & name) const
 {
-    throw Exception(
-        "Cannot update " + formatEntityTypeWithName(type, name) + " in " + getStorageName() + " because this storage is readonly",
-        ErrorCodes::ACCESS_STORAGE_READONLY);
+    throw Exception(ErrorCodes::ACCESS_STORAGE_READONLY, "Cannot update {} in {} because this storage is readonly",
+        formatEntityTypeWithName(type, name), getStorageName());
 }
 
 
 void IAccessStorage::throwReadonlyCannotRemove(AccessEntityType type, const String & name) const
 {
-    throw Exception(
-        "Cannot remove " + formatEntityTypeWithName(type, name) + " from " + getStorageName() + " because this storage is readonly",
-        ErrorCodes::ACCESS_STORAGE_READONLY);
+    throw Exception(ErrorCodes::ACCESS_STORAGE_READONLY, "Cannot remove {} from {} because this storage is readonly",
+        formatEntityTypeWithName(type, name), getStorageName());
 }
 
 
 void IAccessStorage::throwAddressNotAllowed(const Poco::Net::IPAddress & address)
 {
-    throw Exception("Connections from " + address.toString() + " are not allowed", ErrorCodes::IP_ADDRESS_NOT_ALLOWED);
-}
-
-void IAccessStorage::throwAuthenticationTypeNotAllowed(AuthenticationType auth_type)
-{
-    throw Exception(
-        ErrorCodes::AUTHENTICATION_FAILED,
-        "Authentication type {} is not allowed, check the setting allow_{} in the server configuration",
-        toString(auth_type), AuthenticationTypeInfo::get(auth_type).name);
+    throw Exception(ErrorCodes::IP_ADDRESS_NOT_ALLOWED, "Connections from {} are not allowed", address.toString());
 }
 
 void IAccessStorage::throwInvalidCredentials()
 {
-    throw Exception("Invalid credentials", ErrorCodes::WRONG_PASSWORD);
+    throw Exception(ErrorCodes::WRONG_PASSWORD, "Invalid credentials");
 }
 
 void IAccessStorage::throwBackupNotAllowed() const

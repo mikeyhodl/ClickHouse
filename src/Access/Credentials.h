@@ -1,8 +1,12 @@
 #pragma once
 
-#include <base/types.h>
 #include <memory>
+#include <Access/Common/SSLCertificateSubjects.h>
+#include <Common/SSHWrapper.h>
 
+#include <base/types.h>
+
+#include "config.h"
 
 namespace DB
 {
@@ -13,10 +17,14 @@ public:
     explicit Credentials() = default;
     explicit Credentials(const String & user_name_);
 
+    Credentials(const Credentials &) = default;
+    Credentials(Credentials &&) = default;
+
     virtual ~Credentials() = default;
 
     const String & getUserName() const;
     bool isReady() const;
+    virtual bool allowInteractiveBasicAuthenticationInTheBrowser() const { return false; }
 
 protected:
     [[noreturn]] static void throwNotReady();
@@ -41,11 +49,11 @@ class SSLCertificateCredentials
     : public Credentials
 {
 public:
-    explicit SSLCertificateCredentials(const String & user_name_, const String & common_name_);
-    const String & getCommonName() const;
+    explicit SSLCertificateCredentials(const String & user_name_, SSLCertificateSubjects && subjects_);
+    const SSLCertificateSubjects & getSSLCertificateSubjects() const;
 
 private:
-    String common_name;
+    SSLCertificateSubjects certificate_subjects;
 };
 
 class BasicCredentials
@@ -59,9 +67,12 @@ public:
     void setUserName(const String & user_name_);
     void setPassword(const String & password_);
     const String & getPassword() const;
+    bool allowInteractiveBasicAuthenticationInTheBrowser() const override { return allow_interactive_basic_authentication_in_the_browser; }
+    void enableInteractiveBasicAuthenticationInTheBrowser() { allow_interactive_basic_authentication_in_the_browser = true; }
 
 private:
     String password;
+    bool allow_interactive_basic_authentication_in_the_browser = false;
 };
 
 class CredentialsWithScramble : public Credentials
@@ -85,5 +96,63 @@ class MySQLNative41Credentials : public CredentialsWithScramble
 {
     using CredentialsWithScramble::CredentialsWithScramble;
 };
+
+#if USE_SSH
+class SshCredentials : public Credentials
+{
+public:
+    SshCredentials(const String & user_name_, const String & signature_, const String & original_)
+        : Credentials(user_name_), signature(signature_), original(original_)
+    {
+        is_ready = true;
+    }
+
+    const String & getSignature() const
+    {
+        if (!isReady())
+        {
+            throwNotReady();
+        }
+        return signature;
+    }
+
+    const String & getOriginal() const
+    {
+        if (!isReady())
+        {
+            throwNotReady();
+        }
+        return original;
+    }
+
+private:
+    String signature;
+    String original;
+};
+
+/// Credentials used only for logging in with PTY.
+class SSHPTYCredentials : public Credentials
+{
+public:
+    explicit SSHPTYCredentials(const String & user_name_, const SSHKey & key_)
+        : Credentials(user_name_), key(key_)
+    {
+        is_ready = true;
+    }
+
+    const SSHKey & getKey() const
+    {
+        if (!isReady())
+        {
+            throwNotReady();
+        }
+        return key;
+    }
+
+private:
+    SSHKey key;
+};
+#endif
+
 
 }

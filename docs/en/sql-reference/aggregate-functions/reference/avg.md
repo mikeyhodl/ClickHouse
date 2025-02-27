@@ -1,6 +1,8 @@
 ---
-slug: /en/sql-reference/aggregate-functions/reference/avg
-sidebar_position: 5
+slug: /sql-reference/aggregate-functions/reference/avg
+sidebar_position: 112
+title: "avg"
+description: "Calculates the arithmetic mean."
 ---
 
 # avg
@@ -15,12 +17,12 @@ avg(x)
 
 **Arguments**
 
--   `x` — input values, must be [Integer](../../../sql-reference/data-types/int-uint.md), [Float](../../../sql-reference/data-types/float.md), or [Decimal](../../../sql-reference/data-types/decimal.md).
+- `x` — input values, must be [Integer](../../../sql-reference/data-types/int-uint.md), [Float](../../../sql-reference/data-types/float.md), or [Decimal](../../../sql-reference/data-types/decimal.md).
 
 **Returned value**
 
--   The arithmetic mean, always as [Float64](../../../sql-reference/data-types/float.md).
--   `NaN` if the input parameter `x` is empty.
+- The arithmetic mean, always as [Float64](../../../sql-reference/data-types/float.md).
+- `NaN` if the input parameter `x` is empty.
 
 **Example**
 
@@ -52,7 +54,7 @@ Get the arithmetic mean:
 
 Query:
 
-```
+```sql
 SELECT avg(t) FROM test;
 ```
 
@@ -63,5 +65,3 @@ Result:
 │    nan │
 └────────┘
 ```
-
-[Original article](https://clickhouse.com/docs/en/sql-reference/aggregate-functions/reference/avg/) <!--hide-->

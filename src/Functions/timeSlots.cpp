@@ -41,18 +41,17 @@ struct TimeSlotsImpl
     /// The following three methods process DateTime type
     static void vectorVector(
         const PaddedPODArray<UInt32> & starts, const PaddedPODArray<UInt32> & durations, UInt32 time_slot_size,
-        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets)
+        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets,
+        size_t input_rows_count)
     {
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        size_t size = starts.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         ColumnArray::Offset current_offset = 0;
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (UInt32 value = starts[i] / time_slot_size, end = (starts[i] + durations[i]) / time_slot_size; value <= end; ++value)
             {
@@ -66,18 +65,17 @@ struct TimeSlotsImpl
 
     static void vectorConstant(
         const PaddedPODArray<UInt32> & starts, UInt32 duration, UInt32 time_slot_size,
-        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets)
+        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets,
+        size_t input_rows_count)
     {
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        size_t size = starts.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         ColumnArray::Offset current_offset = 0;
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (UInt32 value = starts[i] / time_slot_size, end = (starts[i] + duration) / time_slot_size; value <= end; ++value)
             {
@@ -91,18 +89,17 @@ struct TimeSlotsImpl
 
     static void constantVector(
         UInt32 start, const PaddedPODArray<UInt32> & durations, UInt32 time_slot_size,
-        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets)
+        PaddedPODArray<UInt32> & result_values, ColumnArray::Offsets & result_offsets,
+        size_t input_rows_count)
     {
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        size_t size = durations.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         ColumnArray::Offset current_offset = 0;
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (UInt32 value = start / time_slot_size, end = (start + durations[i]) / time_slot_size; value <= end; ++value)
             {
@@ -120,12 +117,11 @@ struct TimeSlotsImpl
     */
     static NO_SANITIZE_UNDEFINED void vectorVector(
         const PaddedPODArray<DateTime64> & starts, const PaddedPODArray<Decimal64> & durations, Decimal64 time_slot_size,
-        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale)
+        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale,
+        size_t input_rows_count)
     {
-        size_t size = starts.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         /// Modify all units to have same scale
         UInt16 max_scale = std::max({dt_scale, duration_scale, time_slot_scale});
@@ -137,9 +133,9 @@ struct TimeSlotsImpl
         ColumnArray::Offset current_offset = 0;
         time_slot_size = time_slot_size.value * ts_multiplier;
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (DateTime64 value = (starts[i] * dt_multiplier) / time_slot_size, end = (starts[i] * dt_multiplier + durations[i] * dur_multiplier) / time_slot_size; value <= end; value += 1)
             {
@@ -152,12 +148,11 @@ struct TimeSlotsImpl
 
     static NO_SANITIZE_UNDEFINED void vectorConstant(
         const PaddedPODArray<DateTime64> & starts, Decimal64 duration, Decimal64 time_slot_size,
-        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale)
+        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale,
+        size_t input_rows_count)
     {
-        size_t size = starts.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         /// Modify all units to have same scale
         UInt16 max_scale = std::max({dt_scale, duration_scale, time_slot_scale});
@@ -170,9 +165,9 @@ struct TimeSlotsImpl
         duration = duration * dur_multiplier;
         time_slot_size = time_slot_size.value * ts_multiplier;
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (DateTime64 value = (starts[i] * dt_multiplier) / time_slot_size, end = (starts[i] * dt_multiplier + duration) / time_slot_size; value <= end; value += 1)
             {
@@ -185,12 +180,11 @@ struct TimeSlotsImpl
 
     static NO_SANITIZE_UNDEFINED void constantVector(
         DateTime64 start, const PaddedPODArray<Decimal64> & durations, Decimal64 time_slot_size,
-        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale)
+        PaddedPODArray<DateTime64> & result_values, ColumnArray::Offsets & result_offsets, UInt16 dt_scale, UInt16 duration_scale, UInt16 time_slot_scale,
+        size_t input_rows_count)
     {
-        size_t size = durations.size();
-
-        result_offsets.resize(size);
-        result_values.reserve(size);
+        result_offsets.resize(input_rows_count);
+        result_values.reserve(input_rows_count);
 
         /// Modify all units to have same scale
         UInt16 max_scale = std::max({dt_scale, duration_scale, time_slot_scale});
@@ -203,9 +197,9 @@ struct TimeSlotsImpl
         start = dt_multiplier * start;
         time_slot_size = time_slot_size.value * ts_multiplier;
         if (time_slot_size == 0)
-            throw Exception("Time slot size cannot be zero", ErrorCodes::BAD_ARGUMENTS);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Time slot size cannot be zero");
 
-        for (size_t i = 0; i < size; ++i)
+        for (size_t i = 0; i < input_rows_count; ++i)
         {
             for (DateTime64 value = start / time_slot_size, end = (start + durations[i] * dur_multiplier) / time_slot_size; value <= end; value += 1)
             {
@@ -238,55 +232,48 @@ public:
     DataTypePtr getReturnTypeImpl(const ColumnsWithTypeAndName & arguments) const override
     {
         if (arguments.size() != 2 && arguments.size() != 3)
-            throw Exception("Number of arguments for function " + getName() + " doesn't match: passed "
-                            + toString(arguments.size()) + ", should be 2 or 3",
-                            ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
+            throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                            "Number of arguments for function {} doesn't match: passed {}, should be 2 or 3",
+                            getName(), arguments.size());
 
         if (WhichDataType(arguments[0].type).isDateTime())
         {
             if (!WhichDataType(arguments[1].type).isUInt32())
-                throw Exception(
-                    "Illegal type " + arguments[1].type->getName() + " of second argument of function " + getName() + ". Must be UInt32 when first argument is DateTime.",
-                    ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of second argument of function {}. "
+                    "Must be UInt32 when first argument is DateTime.", arguments[1].type->getName(), getName());
 
             if (arguments.size() == 3 && !WhichDataType(arguments[2].type).isNativeUInt())
-                throw Exception(
-                    "Illegal type " + arguments[2].type->getName() + " of third argument of function " + getName() + ". Must be UInt32 when first argument is DateTime.",
-                    ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of third argument of function {}. "
+                    "Must be UInt32 when first argument is DateTime.", arguments[2].type->getName(), getName());
         }
         else if (WhichDataType(arguments[0].type).isDateTime64())
         {
             if (!WhichDataType(arguments[1].type).isDecimal64())
-                throw Exception(
-                    "Illegal type " + arguments[1].type->getName() + " of second argument of function " + getName() + ". Must be Decimal64 when first argument is DateTime64.",
-                    ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of second argument of function {}. "
+                    "Must be Decimal64 when first argument is DateTime64.", arguments[1].type->getName(), getName());
 
             if (arguments.size() == 3 && !WhichDataType(arguments[2].type).isDecimal64())
-                throw Exception(
-                    "Illegal type " + arguments[2].type->getName() + " of third argument of function " + getName() + ". Must be Decimal64 when first argument is DateTime64.",
-                    ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of third argument of function {}. "
+                    "Must be Decimal64 when first argument is DateTime64.", arguments[2].type->getName(), getName());
         }
         else
-            throw Exception("Illegal type " + arguments[0].type->getName() + " of first argument of function " + getName()
-                                + ". Must be DateTime or DateTime64.", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Illegal type {} of first argument of function {}. "
+                                "Must be DateTime or DateTime64.", arguments[0].type->getName(), getName());
 
         /// If time zone is specified for source data type, attach it to the resulting type.
         /// Note that there is no explicit time zone argument for this function (we specify 2 as an argument number with explicit time zone).
         if (WhichDataType(arguments[0].type).isDateTime())
         {
-            return std::make_shared<DataTypeArray>(std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 3, 0)));
-        }
-        else
-        {
-            auto start_time_scale = assert_cast<const DataTypeDateTime64 &>(*arguments[0].type).getScale();
-            auto duration_scale = assert_cast<const DataTypeDecimal64 &>(*arguments[1].type).getScale();
-            return std::make_shared<DataTypeArray>(
-                std::make_shared<DataTypeDateTime64>(std::max(start_time_scale, duration_scale), extractTimeZoneNameFromFunctionArguments(arguments, 3, 0)));
+            return std::make_shared<DataTypeArray>(std::make_shared<DataTypeDateTime>(extractTimeZoneNameFromFunctionArguments(arguments, 3, 0, false)));
         }
 
+        auto start_time_scale = assert_cast<const DataTypeDateTime64 &>(*arguments[0].type).getScale();
+        auto duration_scale = assert_cast<const DataTypeDecimal64 &>(*arguments[1].type).getScale();
+        return std::make_shared<DataTypeArray>(std::make_shared<DataTypeDateTime64>(
+            std::max(start_time_scale, duration_scale), extractTimeZoneNameFromFunctionArguments(arguments, 3, 0, false)));
     }
 
-    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t) const override
+    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr &, size_t input_rows_count) const override
     {
         if (WhichDataType(arguments[0].type).isDateTime())
         {
@@ -295,10 +282,10 @@ public:
             {
                 const auto * time_slot_column = checkAndGetColumn<ColumnConst>(arguments[2].column.get());
                 if (!time_slot_column)
-                    throw Exception("Third argument for function " + getName() + " must be constant UInt32", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                    throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Third argument for function {} must be constant UInt32", getName());
 
                 if (time_slot_size = time_slot_column->getValue<UInt32>(); time_slot_size <= 0)
-                    throw Exception("Third argument for function " + getName() + " must be greater than zero", ErrorCodes::ILLEGAL_COLUMN);
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Third argument for function {} must be greater than zero", getName());
             }
 
             const auto * dt_starts = checkAndGetColumn<ColumnDateTime>(arguments[0].column.get());
@@ -312,17 +299,29 @@ public:
 
             if (dt_starts && durations)
             {
-                TimeSlotsImpl::vectorVector(dt_starts->getData(), durations->getData(), time_slot_size, res_values, res->getOffsets());
+                TimeSlotsImpl::vectorVector(dt_starts->getData(), durations->getData(), time_slot_size, res_values, res->getOffsets(), input_rows_count);
                 return res;
             }
-            else if (dt_starts && const_durations)
+            if (dt_starts && const_durations)
             {
-                TimeSlotsImpl::vectorConstant(dt_starts->getData(), const_durations->getValue<UInt32>(), time_slot_size, res_values, res->getOffsets());
+                TimeSlotsImpl::vectorConstant(
+                    dt_starts->getData(),
+                    const_durations->getValue<UInt32>(),
+                    time_slot_size,
+                    res_values,
+                    res->getOffsets(),
+                    input_rows_count);
                 return res;
             }
-            else if (dt_const_starts && durations)
+            if (dt_const_starts && durations)
             {
-                TimeSlotsImpl::constantVector(dt_const_starts->getValue<UInt32>(), durations->getData(), time_slot_size, res_values, res->getOffsets());
+                TimeSlotsImpl::constantVector(
+                    dt_const_starts->getValue<UInt32>(),
+                    durations->getData(),
+                    time_slot_size,
+                    res_values,
+                    res->getOffsets(),
+                    input_rows_count);
                 return res;
             }
         }
@@ -335,10 +334,10 @@ public:
             {
                 const auto * time_slot_column = checkAndGetColumn<ColumnConst>(arguments[2].column.get());
                 if (!time_slot_column)
-                    throw Exception("Third argument for function " + getName() + " must be constant Decimal64", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+                    throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Third argument for function {} must be constant Decimal64", getName());
 
                 if (time_slot_size = time_slot_column->getValue<Decimal64>(); time_slot_size <= 0)
-                    throw Exception("Third argument for function " + getName() + " must be greater than zero", ErrorCodes::ILLEGAL_COLUMN);
+                    throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Third argument for function {} must be greater than zero", getName());
                 time_slot_scale = assert_cast<const DataTypeDecimal64 *>(arguments[2].type.get())->getScale();
             }
 
@@ -357,39 +356,51 @@ public:
             if (starts && durations)
             {
                 TimeSlotsImpl::vectorVector(starts->getData(), durations->getData(), time_slot_size, res_values, res->getOffsets(),
-                    start_time_scale, duration_scale, time_slot_scale);
+                    start_time_scale, duration_scale, time_slot_scale, input_rows_count);
                 return res;
             }
-            else if (starts && const_durations)
+            if (starts && const_durations)
             {
                 TimeSlotsImpl::vectorConstant(
-                    starts->getData(), const_durations->getValue<Decimal64>(), time_slot_size, res_values, res->getOffsets(),
-                    start_time_scale, duration_scale, time_slot_scale);
+                    starts->getData(),
+                    const_durations->getValue<Decimal64>(),
+                    time_slot_size,
+                    res_values,
+                    res->getOffsets(),
+                    start_time_scale,
+                    duration_scale,
+                    time_slot_scale,
+                    input_rows_count);
                 return res;
             }
-            else if (const_starts && durations)
+            if (const_starts && durations)
             {
                 TimeSlotsImpl::constantVector(
-                    const_starts->getValue<DateTime64>(), durations->getData(), time_slot_size, res_values, res->getOffsets(),
-                    start_time_scale, duration_scale, time_slot_scale);
+                    const_starts->getValue<DateTime64>(),
+                    durations->getData(),
+                    time_slot_size,
+                    res_values,
+                    res->getOffsets(),
+                    start_time_scale,
+                    duration_scale,
+                    time_slot_scale,
+                    input_rows_count);
                 return res;
             }
         }
 
         if (arguments.size() == 3)
         {
-            throw Exception(
-                "Illegal columns " + arguments[0].column->getName() + ", " + arguments[1].column->getName() + ", "
-                    + arguments[2].column->getName() + " of arguments of function " + getName(),
-                ErrorCodes::ILLEGAL_COLUMN);
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "Illegal columns {}, {}, {} of arguments of function {}",
+                arguments[0].column->getName(), arguments[1].column->getName(), arguments[2].column->getName(), getName());
         }
-        else
-        {
-            throw Exception(
-                "Illegal columns " + arguments[0].column->getName() + ", " + arguments[1].column->getName()
-                    + " of arguments of function " + getName(),
-                ErrorCodes::ILLEGAL_COLUMN);
-        }
+
+        throw Exception(
+            ErrorCodes::ILLEGAL_COLUMN,
+            "Illegal columns {}, {} of arguments of function {}",
+            arguments[0].column->getName(),
+            arguments[1].column->getName(),
+            getName());
     }
 };
 

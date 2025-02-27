@@ -40,7 +40,7 @@ public:
                 ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
                 "Number of arguments for function {} doesn't match: passed {}, should be 1",
                 getName(),
-                toString(arguments.size()));
+                arguments.size());
 
         WhichDataType argument_type(arguments[0].type);
         if (!argument_type.isDate() && !argument_type.isDateTime() && !argument_type.isDateTime64())
@@ -49,6 +49,11 @@ public:
                 "Illegal type of argument of function {}, should be Date, DateTime or DateTime64",
                 getName());
 
+        return std::make_shared<DataTypeString>();
+    }
+
+    DataTypePtr getReturnTypeForDefaultImplementationForDynamic() const override
+    {
         return std::make_shared<DataTypeString>();
     }
 
@@ -65,7 +70,7 @@ public:
         };
 
         auto date_name_func = function_resolver->build(temporary_columns);
-        return date_name_func->execute(temporary_columns, result_type, input_rows_count);
+        return date_name_func->execute(temporary_columns, result_type, input_rows_count, /* dry_run = */ false);
     }
 
 private:
@@ -74,7 +79,7 @@ private:
 
 REGISTER_FUNCTION(MonthName)
 {
-    factory.registerFunction<FunctionMonthName>({}, FunctionFactory::CaseInsensitive);
+    factory.registerFunction<FunctionMonthName>({}, FunctionFactory::Case::Insensitive);
 }
 
 }
